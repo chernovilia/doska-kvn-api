@@ -1,0 +1,175 @@
+// Doska/КВН — Prisma-схема
+// Полная спецификация: /ARCHITECTURE.md → «Слой данных (backend contract)».
+// MVP-версия: включены только таблицы, нужные на первых 2 этапах.
+// Остальные (Chat/Message/Review/Report/…) добавим на этапах 3–4.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Справочники
+// ─────────────────────────────────────────────────────────────
+
+model Region {
+  id        String   @id
+  name      String
+  shortName String
+  hint      String?
+  domain    String?  @unique
+  launched  Boolean  @default(false)
+  neighbors String[] @default([])
+  createdAt DateTime @default(now())
+
+  cities City[]
+  ads    Ad[]
+}
+
+model City {
+  id         String  @id
+  name       String
+  regionId   String
+  population Int?
+  lat        Float?
+  lon        Float?
+
+  region Region @relation(fields: [regionId], references: [id])
+  ads    Ad[]
+
+  @@index([regionId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Пользователи
+// ─────────────────────────────────────────────────────────────
+
+enum UserType {
+  personal
+  shop
+}
+
+enum UserRole {
+  user
+  moderator
+  content
+  support
+  admin
+  owner
+}
+
+model User {
+  id           String    @id @default(uuid())
+  phone        String?   @unique
+  email        String?   @unique
+  name         String
+  avatar       String?
+  homeCityId   String?
+  bio          String?
+  type         UserType  @default(personal)
+  role         UserRole  @default(user)
+  verified     Boolean   @default(false)
+  rating       Float     @default(0)
+  reviewsCount Int       @default(0)
+  dealsCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  blockedAt    DateTime?
+  blockReason  String?
+
+  ads Ad[]
+
+  @@index([role])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Объявления
+// ─────────────────────────────────────────────────────────────
+
+enum AdStatus {
+  pending
+  approved
+  rejected
+  hidden
+  expired
+}
+
+enum ModerationLevel {
+  auto
+  manual
+  llm
+}
+
+model Ad {
+  id              String          @id @default(uuid())
+  section         String          // 'market' | 'services' | 'realty' | 'auto' | 'events'
+  categoryGroup   String?         // 'Электроника'
+  category        String?         // 'Смартфоны'
+  title           String
+  price           Int             @default(0)
+  priceSuffix     String?
+  description     String?
+  address         String
+  phone           String?
+  avitoUrl        String?
+
+  cityId          String
+  regionId        String
+  authorId        String
+
+  status          AdStatus        @default(pending)
+  moderationLevel ModerationLevel @default(auto)
+  moderationNotes String?
+
+  top             Boolean         @default(false)
+  urgent          Boolean         @default(false)
+  verified        Boolean         @default(false)
+
+  eventDate       DateTime?
+
+  createdAt       DateTime        @default(now())
+  publishedAt     DateTime?
+  expiresAt       DateTime?
+
+  viewsCount      Int             @default(0)
+  favoritesCount  Int             @default(0)
+  reportsCount    Int             @default(0)
+
+  city            City            @relation(fields: [cityId], references: [id])
+  region          Region          @relation(fields: [regionId], references: [id])
+  author          User            @relation(fields: [authorId], references: [id])
+  photos          AdPhoto[]
+
+  @@index([regionId, section, status, createdAt(sort: Desc)])
+  @@index([cityId, section, status, createdAt(sort: Desc)])
+  @@index([authorId, status, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+}
+
+model AdPhoto {
+  id    String @id @default(uuid())
+  adId  String
+  url   String
+  order Int    @default(0)
+  phash String?
+
+  ad Ad @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([adId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Служебное
+// ─────────────────────────────────────────────────────────────
+
+model Setting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
