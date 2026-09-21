@@ -1,7 +1,6 @@
 // Doska/КВН — Prisma-схема
-// Полная спецификация: /ARCHITECTURE.md → «Слой данных (backend contract)».
-// MVP-версия: включены только таблицы, нужные на первых 2 этапах.
-// Остальные (Chat/Message/Review/Report/…) добавим на этапах 3–4.
+// Полная спецификация: /ARCHITECTURE.md + /BUSINESS-MODEL.md
+// MVP-версия с заделом под все планируемые фичи монетизации и бизнес-типы.
 
 generator client {
   provider = "prisma-client-js"
@@ -45,11 +44,12 @@ model City {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Пользователи
+// Пользователи и бизнес-профили
 // ─────────────────────────────────────────────────────────────
 
 enum UserType {
   personal
+  master
   shop
 }
 
@@ -70,21 +70,73 @@ model User {
   avatar       String?
   homeCityId   String?
   bio          String?
+
   type         UserType  @default(personal)
   role         UserRole  @default(user)
+
   verified     Boolean   @default(false)
+  isPublic     Boolean   @default(false)   // Тумблер публичности для personal
   rating       Float     @default(0)
   reviewsCount Int       @default(0)
   dealsCount   Int       @default(0)
+
+  // Статус подписки (кешируется для быстрой проверки)
+  subscriptionExpired Boolean @default(false)
+
   createdAt    DateTime  @default(now())
   lastSeenAt   DateTime  @default(now())
   blockedAt    DateTime?
   blockReason  String?
 
-  ads Ad[]
+  businessProfile BusinessProfile?
+  wallet          Wallet?
+  ads             Ad[]
+  subscriptions   Subscription[]
+  payments        Payment[]
 
   @@index([role])
   @@index([type])
+  @@index([subscriptionExpired])
+}
+
+model BusinessProfile {
+  userId       String    @id
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  slug         String    @unique     // /u/[slug]
+  name         String
+  description  String?
+  logo         String?
+  categories   String[]  @default([])
+  hours        String?
+  address      String?
+  phone        String?
+  website      String?
+
+  vkGroupUrl   String?
+  verified     Boolean   @default(false)      // «Проверен через Подслушано»
+  legalVerified Boolean  @default(false)      // Юр. проверка ИП/ООО
+
+  // Тариф текущей подписки (для быстрой проверки без JOIN)
+  currentTierName String?
+  currentTierExpiresAt DateTime?
+
+  viewsCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+  archivedAt   DateTime?                     // При переключении на Личный
+}
+
+model TrustedDevice {
+  id           String   @id @default(uuid())
+  userId       String
+  deviceId     String                       // Кука на клиенте
+  userAgent    String?
+  ip           String?
+  firstUsedAt  DateTime @default(now())
+  lastUsedAt   DateTime @default(now())
+
+  @@unique([userId, deviceId])
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -107,9 +159,9 @@ enum ModerationLevel {
 
 model Ad {
   id              String          @id @default(uuid())
-  section         String          // 'market' | 'services' | 'realty' | 'auto' | 'events'
-  categoryGroup   String?         // 'Электроника'
-  category        String?         // 'Смартфоны'
+  section         String
+  categoryGroup   String?
+  category        String?
   title           String
   price           Int             @default(0)
   priceSuffix     String?
@@ -122,10 +174,22 @@ model Ad {
   regionId        String
   authorId        String
 
+  // Снапшот автора на момент публикации (не меняется при смене типа)
+  authorType      UserType        @default(personal)
+  authorSnapshot  Json?                                   // {name, avatar, rating, verified}
+
   status          AdStatus        @default(pending)
   moderationLevel ModerationLevel @default(auto)
   moderationNotes String?
 
+  // Продвижение
+  promoLevel      Int             @default(0)             // 0-4
+  promoExpiresAt  DateTime?
+  boostedAt       DateTime?
+  autoBumpUntil   DateTime?                               // Автоподъём (пакетная опция)
+  highlight       Boolean         @default(false)
+
+  // Тумблеры-плашки для быстрого рендера
   top             Boolean         @default(false)
   urgent          Boolean         @default(false)
   verified        Boolean         @default(false)
@@ -136,19 +200,27 @@ model Ad {
   publishedAt     DateTime?
   expiresAt       DateTime?
 
-  viewsCount      Int             @default(0)
-  favoritesCount  Int             @default(0)
-  reportsCount    Int             @default(0)
+  // Аналитика — счётчики для быстрой сортировки
+  viewsCount          Int @default(0)
+  phoneRevealsCount   Int @default(0)
+  writeClicksCount    Int @default(0)
+  favoritesCount      Int @default(0)
+  reportsCount        Int @default(0)
 
   city            City            @relation(fields: [cityId], references: [id])
   region          Region          @relation(fields: [regionId], references: [id])
   author          User            @relation(fields: [authorId], references: [id])
   photos          AdPhoto[]
+  favorites       Favorite[]
+  views           AdView[]
+  reports         Report[]
+  promos          AdPromo[]
 
   @@index([regionId, section, status, createdAt(sort: Desc)])
   @@index([cityId, section, status, createdAt(sort: Desc)])
   @@index([authorId, status, createdAt(sort: Desc)])
   @@index([status, createdAt])
+  @@index([promoLevel, promoExpiresAt])
 }
 
 model AdPhoto {
@@ -164,7 +236,316 @@ model AdPhoto {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Служебное
+// Взаимодействия
+// ─────────────────────────────────────────────────────────────
+
+model Favorite {
+  userId String
+  adId   String
+  at     DateTime @default(now())
+
+  ad Ad @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@id([userId, adId])
+  @@index([userId, at])
+}
+
+model AdView {
+  id      String   @id @default(uuid())
+  userId  String?
+  sessionId String?
+  adId    String
+  at      DateTime @default(now())
+  source  String?                            // 'feed' | 'search' | 'nearby' | 'similar' | 'direct'
+
+  ad Ad @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
+  @@index([adId, at])
+}
+
+enum ReportStatus {
+  pending
+  resolved
+  dismissed
+}
+
+model Report {
+  id           String       @id @default(uuid())
+  fromUserId   String
+  targetKind   String                                    // 'ad' | 'user' | 'business'
+  targetId     String
+  reason       String                                    // 'spam' | 'scam' | 'illegal' | 'wrong-category' | 'other'
+  comment      String?
+  status       ReportStatus @default(pending)
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  ad Ad? @relation(fields: [targetId], references: [id], onDelete: Cascade, map: "Report_ad_fkey")
+
+  @@index([targetKind, targetId])
+  @@index([status, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Аналитика (сырые события — фундамент под будущий рекомендер)
+// ─────────────────────────────────────────────────────────────
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  sessionId String?
+  name      String                             // 'ad_view' | 'phone_reveal' | 'write_click' | 'favorite' | 'place_change' | ...
+  props     Json?
+  at        DateTime @default(now())
+
+  @@index([name, at])
+  @@index([userId, at])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Монетизация — тарифы, подписки, разовые опции
+// ─────────────────────────────────────────────────────────────
+
+enum TierName {
+  start
+  top
+  premium
+}
+
+model Tier {
+  name              TierName  @id
+  displayName       String
+  priceMonthly      Int                                  // копейки, 0 = бесплатный
+  priceYearly       Int                                  // копейки
+  currency          String    @default("RUB")
+
+  // Возможности
+  maxActiveAds        Int
+  autoPromoLevel      Int       @default(0)
+  hasAnalytics        Boolean   @default(false)
+  hasTopBadge         Boolean   @default(false)
+  hasPartnerBadge     Boolean   @default(false)
+  showAllRegionCities Boolean   @default(false)          // Премиум: показ во всех городах региона
+  hasPrioritySupport  Boolean   @default(false)
+
+  availableForTypes   UserType[] @default([])            // [master, shop]
+
+  active              Boolean   @default(true)
+  displayOrder        Int       @default(0)
+
+  subscriptions Subscription[]
+}
+
+enum SubscriptionStatus {
+  active
+  grace
+  expired
+  cancelled
+}
+
+model Subscription {
+  id             String              @id @default(uuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tierName       TierName
+  tier           Tier                @relation(fields: [tierName], references: [name])
+
+  startedAt      DateTime            @default(now())
+  expiresAt      DateTime
+  cancelledAt    DateTime?
+  autoRenew      Boolean             @default(true)
+
+  status         SubscriptionStatus  @default(active)
+
+  paymentId      String?
+  paidAmount     Int?
+
+  createdAt      DateTime            @default(now())
+
+  @@index([userId, status])
+  @@index([expiresAt, status])
+}
+
+enum AdPromoType {
+  bump
+  urgent
+  vip
+  highlight
+  auto_bump
+}
+
+model AdPromo {
+  id           String       @id @default(uuid())
+  adId         String
+  ad           Ad           @relation(fields: [adId], references: [id], onDelete: Cascade)
+  userId       String
+
+  type         AdPromoType
+  promoLevel   Int?
+  startedAt    DateTime     @default(now())
+  expiresAt    DateTime
+
+  paymentId    String?
+  paidAmount   Int?
+
+  createdAt    DateTime     @default(now())
+
+  @@index([adId, expiresAt])
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Баннеры
+// ─────────────────────────────────────────────────────────────
+
+enum BannerModerationStatus {
+  pending
+  approved
+  rejected
+}
+
+model Banner {
+  id             String                  @id @default(uuid())
+  advertiserId   String
+
+  title          String
+  subtitle       String?
+  imageUrl       String
+  linkUrl        String?
+  ctaText        String?
+
+  position       String                                  // 'home_slide' | 'feed_inline' | 'ad_sidebar' | 'category_top'
+  priority       Int                     @default(0)
+
+  targetCities   String[]                @default([])
+  targetRegions  String[]                @default([])
+  targetSections String[]                @default([])
+
+  startsAt       DateTime
+  endsAt         DateTime
+  active         Boolean                 @default(false)
+
+  pricingModel   String                  @default("daily")   // 'daily' | 'weekly' | 'cpm' | 'cpc'
+  paidAmount     Int?
+
+  viewsCount     Int                     @default(0)
+  clicksCount    Int                     @default(0)
+
+  moderationStatus BannerModerationStatus @default(pending)
+  moderatedAt      DateTime?
+  moderatedById    String?
+
+  createdAt      DateTime                @default(now())
+
+  @@index([position, active, startsAt, endsAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Платежи — общий журнал
+// ─────────────────────────────────────────────────────────────
+
+enum PaymentPurpose {
+  subscription
+  ad_promo
+  banner
+  verification
+  package
+  wallet_topup
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+}
+
+model Payment {
+  id           String         @id @default(uuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id])
+
+  amount       Int                                         // копейки
+  currency     String         @default("RUB")
+
+  purpose      PaymentPurpose
+  purposeId    String?                                     // ID Subscription / AdPromo / Banner
+
+  status       PaymentStatus  @default(pending)
+
+  provider     String         @default("yookassa")
+  providerRef  String?
+
+  createdAt    DateTime       @default(now())
+  succeededAt  DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Кошелёк «звёзд» (gamification)
+// ─────────────────────────────────────────────────────────────
+
+model Wallet {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0)                          // звёзды
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id         String   @id @default(uuid())
+  walletUserId String
+  wallet     Wallet   @relation(fields: [walletUserId], references: [userId], onDelete: Cascade)
+
+  amount     Int                                          // +N = зачисление, -N = списание
+  reason     String                                       // 'reward:first_ad' | 'spend:bump' | ...
+  reference  String?                                      // ID связанной сущности
+
+  createdAt  DateTime @default(now())
+
+  @@index([walletUserId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Промо-коды
+// ─────────────────────────────────────────────────────────────
+
+model Promocode {
+  code            String    @id
+  discountPercent Int?
+  discountAmount  Int?                                    // копейки
+  applicableTo    String[]  @default([])                  // ['tier:top', 'ad_promo:vip']
+  maxUses         Int?
+  usedCount       Int       @default(0)
+  usableUntil     DateTime?
+  active          Boolean   @default(true)
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+
+  uses            PromocodeUse[]
+}
+
+model PromocodeUse {
+  id              String    @id @default(uuid())
+  promocodeCode   String
+  promocode       Promocode @relation(fields: [promocodeCode], references: [code], onDelete: Cascade)
+  userId          String
+  paymentId       String?
+  discountApplied Int
+  usedAt          DateTime  @default(now())
+
+  @@index([promocodeCode, usedAt])
+  @@index([userId, usedAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Feature flags и настройки
 // ─────────────────────────────────────────────────────────────
 
 model Setting {
