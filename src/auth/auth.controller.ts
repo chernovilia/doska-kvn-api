@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Ip,
+  Patch,
   Post,
   Req,
   Res,
@@ -13,6 +14,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RequestCodeDto } from './dto/request-code.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 
@@ -139,12 +141,20 @@ export class AuthController {
 }
 
 @Controller('me')
+@UseGuards(JwtAuthGuard)
 export class MeController {
   constructor(private readonly auth: AuthService) {}
 
-  @UseGuards(JwtAuthGuard)
   @Get()
   async me(@CurrentUser() userId: string) {
     return this.auth.me(userId);
+  }
+
+  @Patch()
+  async update(
+    @CurrentUser() userId: string,
+    @Body() dto: UpdateMeDto
+  ) {
+    return this.auth.updateMe(userId, dto);
   }
 }

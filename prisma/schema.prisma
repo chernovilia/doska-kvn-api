@@ -62,6 +62,14 @@ enum UserRole {
   owner
 }
 
+// Способ связи по умолчанию для контактов из объявлений юзера.
+// phone — показываем номер и кнопку «Позвонить»;
+// chat — прячем номер, только встроенные сообщения.
+enum ContactMethod {
+  phone
+  chat
+}
+
 model User {
   id           String    @id @default(uuid())
   phone        String?   @unique
@@ -79,6 +87,13 @@ model User {
   rating       Float     @default(0)
   reviewsCount Int       @default(0)
   dealsCount   Int       @default(0)
+
+  contactMethod ContactMethod @default(chat)
+  notifyEmail   Boolean       @default(true)
+
+  // Онбординг: null = ещё не прошёл; фронт показывает модалку до заполнения.
+  onboardedAt    DateTime?
+  agreedTermsAt  DateTime?
 
   // Статус подписки (кешируется для быстрой проверки)
   subscriptionExpired Boolean @default(false)

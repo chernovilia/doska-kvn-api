@@ -293,4 +293,56 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('User not found');
     return user;
   }
+
+  async updateMe(
+    userId: string,
+    dto: {
+      name?: string;
+      homeCityId?: string;
+      bio?: string;
+      phone?: string;
+      contactMethod?: 'phone' | 'chat';
+      notifyEmail?: boolean;
+      markOnboarded?: boolean;
+      agreeTerms?: boolean;
+    }
+  ) {
+    const data: Record<string, unknown> = {};
+
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.homeCityId !== undefined) {
+      // Проверим что город существует, чтобы FK-подобная валидация была прямо тут.
+      const city = await this.prisma.city.findUnique({
+        where: { id: dto.homeCityId }
+      });
+      if (!city) {
+        throw new BadRequestException('Unknown homeCityId');
+      }
+      data.homeCityId = dto.homeCityId;
+    }
+    if (dto.bio !== undefined) data.bio = dto.bio;
+    if (dto.phone !== undefined) {
+      const normalized = dto.phone.replace(/[^\d+]/g, '');
+      data.phone = normalized || null;
+    }
+    if (dto.contactMethod !== undefined) data.contactMethod = dto.contactMethod;
+    if (dto.notifyEmail !== undefined) data.notifyEmail = dto.notifyEmail;
+    if (dto.markOnboarded === true) data.onboardedAt = new Date();
+    if (dto.agreeTerms === true) data.agreedTermsAt = new Date();
+
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data
+      });
+    } catch (err: any) {
+      // Уникальный конфликт (например, phone занят другим юзером).
+      if (err?.code === 'P2002') {
+        throw new BadRequestException('phone: already in use');
+      }
+      throw err;
+    }
+
+    return this.me(userId);
+  }
 }
