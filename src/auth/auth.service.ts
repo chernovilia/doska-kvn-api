@@ -176,18 +176,10 @@ export class AuthService {
 
     // Генерим access + refresh пары.
     const tokens = await this.issueTokens(user.id, ctx);
+    const fullUser = await this.me(user.id);
     return {
       ok: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatar: user.avatar,
-        type: user.type,
-        role: user.role,
-        verified: user.verified,
-        subscriptionExpired: user.subscriptionExpired
-      },
+      user: fullUser,
       ...tokens
     };
   }
