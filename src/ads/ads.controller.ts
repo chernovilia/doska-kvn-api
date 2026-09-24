@@ -38,3 +38,16 @@ export class AdsController {
     return this.ads.create(userId, dto);
   }
 }
+
+// GET /v1/me/ads — свои объявления (все статусы).
+// Отдельный контроллер, чтобы префикс URL был /me/*, а не /ads/*.
+@Controller('me/ads')
+@UseGuards(JwtAuthGuard)
+export class MyAdsController {
+  constructor(private readonly ads: AdsService) {}
+
+  @Get()
+  list(@CurrentUser() userId: string) {
+    return this.ads.listMine(userId);
+  }
+}

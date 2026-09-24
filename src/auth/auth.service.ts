@@ -149,14 +149,13 @@ export class AuthService {
       data: { usedAt: new Date() }
     });
 
-    // Найти или создать юзера. Аватар/имя оставляем пустыми — заполнит сам в профиле.
+    // Найти или создать юзера. Имя пустое — заполнит на онбординге.
     let user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
-      const nameFromEmail = email.split('@')[0].replace(/[._-]/g, ' ');
       user = await this.prisma.user.create({
         data: {
           email,
-          name: nameFromEmail.charAt(0).toUpperCase() + nameFromEmail.slice(1)
+          name: ''
         }
       });
     } else {

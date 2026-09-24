@@ -74,7 +74,7 @@ model User {
   id           String    @id @default(uuid())
   phone        String?   @unique
   email        String?   @unique
-  name         String
+  name         String    @default("")
   avatar       String?
   homeCityId   String?
   bio          String?

@@ -185,6 +185,19 @@ export class AdsService {
     return { items, total };
   }
 
+  // Все объявления автора — включая pending/rejected/archived.
+  // Для страницы «Мои объявления» в кабинете.
+  async listMine(userId: string) {
+    const items = await this.prisma.ad.findMany({
+      where: { authorId: userId },
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        photos: { orderBy: { order: 'asc' } }
+      }
+    });
+    return { items, total: items.length };
+  }
+
   async findById(id: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id },
@@ -247,7 +260,12 @@ export class AdsService {
           verified: author.verified,
           type: author.type
         },
-        status: AdStatus.pending
+        // MVP: автопубликация. Флажок AD_AUTOAPPROVE=false → модерация.
+        // Позже подключим ИИ-модерацию — там будет три состояния.
+        status:
+          process.env.AD_AUTOAPPROVE === 'false'
+            ? AdStatus.pending
+            : AdStatus.approved
       }
     });
   }
