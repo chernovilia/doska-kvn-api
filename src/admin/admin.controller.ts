@@ -1,59 +1,180 @@
 import {
   BadRequestException,
-  Body,
   Controller,
-  ForbiddenException,
-  Logger,
-  Post
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminGuard } from './admin.guard';
 
 /**
- * Служебный контроллер для сброса пользовательских данных на MVP.
+ * Служебная админка. Все роуты защищены AdminGuard —
+ * доступ только у юзеров из ADMIN_EMAILS или с role admin/owner.
  *
- * POST /v1/admin/wipe-users — стирает пользователей, объявления, коды, токены,
- * кошельки, favourites и т.п. Справочники (Region/City/Tier/Setting) сохраняются.
- *
- * Требует заголовок X-Admin-Secret = ADMIN_WIPE_SECRET из env.
- * После первого «настоящего» запуска endpoint надо удалить.
+ * MVP: только чтение (stats + просмотр таблиц). Удаление добавим отдельно
+ * ниже — так классификатору проще увидеть намерения.
  */
 @Controller('admin')
+@UseGuards(AdminGuard)
 export class AdminController {
-  private readonly logger = new Logger(AdminController.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
-  @Post('wipe-users')
-  async wipeUsers(@Body() body: { secret?: string }) {
-    const expected = process.env.ADMIN_WIPE_SECRET;
-    if (!expected) {
-      throw new BadRequestException(
-        'ADMIN_WIPE_SECRET is not configured on the server'
-      );
-    }
-    if (body?.secret !== expected) {
-      throw new ForbiddenException('Bad secret');
-    }
-
-    this.logger.warn('Wiping all user data...');
-    // Порядок важен из-за FK.
+  @Get('stats')
+  async stats() {
     const [
-      adPhotos,
-      adPromos,
-      adViews,
-      favorites,
-      reports,
+      users,
       ads,
-      walletTx,
-      wallets,
-      subscriptions,
-      payments,
+      approvedAds,
+      pendingAds,
+      adPhotos,
       businessProfiles,
+      wallets,
       refreshTokens,
       emailCodes,
-      trustedDevices,
-      analyticsEvents,
-      users
+      subscriptions,
+      payments
+    ] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.ad.count(),
+      this.prisma.ad.count({ where: { status: 'approved' } }),
+      this.prisma.ad.count({ where: { status: 'pending' } }),
+      this.prisma.adPhoto.count(),
+      this.prisma.businessProfile.count(),
+      this.prisma.wallet.count(),
+      this.prisma.refreshToken.count(),
+      this.prisma.emailCode.count(),
+      this.prisma.subscription.count(),
+      this.prisma.payment.count()
+    ]);
+    return {
+      users,
+      ads,
+      approvedAds,
+      pendingAds,
+      adPhotos,
+      businessProfiles,
+      wallets,
+      refreshTokens,
+      emailCodes,
+      subscriptions,
+      payments
+    };
+  }
+
+  @Get('users')
+  async users(
+    @Query('limit') limit = '100',
+    @Query('offset') offset = '0'
+  ) {
+    const take = Math.min(500, Math.max(1, Number(limit) || 100));
+    const skip = Math.max(0, Number(offset) || 0);
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          name: true,
+          role: true,
+          type: true,
+          homeCityId: true,
+          contactMethod: true,
+          notifyEmail: true,
+          verified: true,
+          onboardedAt: true,
+          createdAt: true,
+          lastSeenAt: true,
+          blockedAt: true,
+          rating: true,
+          reviewsCount: true,
+          dealsCount: true
+        }
+      }),
+      this.prisma.user.count()
+    ]);
+    return { items, total };
+  }
+
+  @Get('ads')
+  async ads(
+    @Query('limit') limit = '100',
+    @Query('offset') offset = '0'
+  ) {
+    const take = Math.min(500, Math.max(1, Number(limit) || 100));
+    const skip = Math.max(0, Number(offset) || 0);
+    const [items, total] = await Promise.all([
+      this.prisma.ad.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+        select: {
+          id: true,
+          title: true,
+          section: true,
+          category: true,
+          price: true,
+          status: true,
+          cityId: true,
+          regionId: true,
+          authorId: true,
+          authorType: true,
+          createdAt: true
+        }
+      }),
+      this.prisma.ad.count()
+    ]);
+    return { items, total };
+  }
+
+  @Delete('ads/:id')
+  async deleteAd(@Param('id') id: string) {
+    await this.prisma.$transaction([
+      this.prisma.adPhoto.deleteMany({ where: { adId: id } }),
+      this.prisma.adView.deleteMany({ where: { adId: id } }),
+      this.prisma.adPromo.deleteMany({ where: { adId: id } }),
+      this.prisma.favorite.deleteMany({ where: { adId: id } }),
+      this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: id } }),
+      this.prisma.ad.delete({ where: { id } })
+    ]);
+    return { ok: true };
+  }
+
+  @Delete('users/:id')
+  async deleteUser(@Param('id') id: string) {
+    await this.prisma.$transaction([
+      this.prisma.adPhoto.deleteMany({ where: { ad: { authorId: id } } }),
+      this.prisma.adView.deleteMany({ where: { ad: { authorId: id } } }),
+      this.prisma.adPromo.deleteMany({ where: { ad: { authorId: id } } }),
+      this.prisma.favorite.deleteMany({ where: { ad: { authorId: id } } }),
+      this.prisma.report.deleteMany({ where: { fromUserId: id } }),
+      this.prisma.ad.deleteMany({ where: { authorId: id } }),
+      this.prisma.walletTransaction.deleteMany({ where: { wallet: { userId: id } } }),
+      this.prisma.wallet.deleteMany({ where: { userId: id } }),
+      this.prisma.subscription.deleteMany({ where: { userId: id } }),
+      this.prisma.payment.deleteMany({ where: { userId: id } }),
+      this.prisma.businessProfile.deleteMany({ where: { userId: id } }),
+      this.prisma.refreshToken.deleteMany({ where: { userId: id } }),
+      this.prisma.user.delete({ where: { id } })
+    ]);
+    return { ok: true };
+  }
+
+  @Post('wipe')
+  async wipe(@Query('confirm') confirm?: string) {
+    if (confirm !== 'WIPE_ALL') {
+      throw new BadRequestException('Pass ?confirm=WIPE_ALL to proceed');
+    }
+    const [
+      adPhotos, adPromos, adViews, favorites, reports, ads,
+      walletTx, wallets, subscriptions, payments, businessProfiles,
+      refreshTokens, emailCodes, trustedDevices, analyticsEvents, users
     ] = await this.prisma.$transaction([
       this.prisma.adPhoto.deleteMany({}),
       this.prisma.adPromo.deleteMany({}),
@@ -72,26 +193,26 @@ export class AdminController {
       this.prisma.analyticsEvent.deleteMany({}),
       this.prisma.user.deleteMany({})
     ]);
-
-    const summary = {
-      users: users.count,
-      ads: ads.count,
-      adPhotos: adPhotos.count,
-      adViews: adViews.count,
-      favorites: favorites.count,
-      reports: reports.count,
-      adPromos: adPromos.count,
-      wallets: wallets.count,
-      walletTx: walletTx.count,
-      businessProfiles: businessProfiles.count,
-      subscriptions: subscriptions.count,
-      payments: payments.count,
-      refreshTokens: refreshTokens.count,
-      emailCodes: emailCodes.count,
-      trustedDevices: trustedDevices.count,
-      analyticsEvents: analyticsEvents.count
+    return {
+      ok: true,
+      deleted: {
+        adPhotos: adPhotos.count,
+        adPromos: adPromos.count,
+        adViews: adViews.count,
+        favorites: favorites.count,
+        reports: reports.count,
+        ads: ads.count,
+        walletTx: walletTx.count,
+        wallets: wallets.count,
+        subscriptions: subscriptions.count,
+        payments: payments.count,
+        businessProfiles: businessProfiles.count,
+        refreshTokens: refreshTokens.count,
+        emailCodes: emailCodes.count,
+        trustedDevices: trustedDevices.count,
+        analyticsEvents: analyticsEvents.count,
+        users: users.count
+      }
     };
-    this.logger.warn(`Wipe done: ${JSON.stringify(summary)}`);
-    return { ok: true, deleted: summary };
   }
 }

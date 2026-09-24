@@ -290,7 +290,19 @@ export class AuthService {
       }
     });
     if (!user) throw new UnauthorizedException('User not found');
-    return user;
+
+    // Флаг для фронта: показывать ли ссылку на админку.
+    // Ту же логику применяет AdminGuard на запросах в /admin/*.
+    const adminEmails = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    const isAdmin =
+      user.role === 'admin' ||
+      user.role === 'owner' ||
+      (!!user.email && adminEmails.includes(user.email.toLowerCase()));
+
+    return { ...user, isAdmin };
   }
 
   async updateMe(
