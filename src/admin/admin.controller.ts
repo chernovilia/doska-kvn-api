@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards
@@ -22,6 +24,37 @@ import { AdminGuard } from './admin.guard';
 @UseGuards(AdminGuard)
 export class AdminController {
   constructor(private readonly prisma: PrismaService) {}
+
+  // ── Модерация ────────────────────────────────────────────────────
+  // Ключ Setting: 'moderation.autoApprove' ('true' | 'false').
+  // Если запись отсутствует — считаем что автопубликация включена (MVP).
+
+  @Get('moderation')
+  async getModeration() {
+    const s = await this.prisma.setting.findUnique({
+      where: { key: 'moderation.autoApprove' }
+    });
+    const value = s?.value ?? 'true';
+    return { autoApprove: value === 'true' };
+  }
+
+  @Patch('moderation')
+  async setModeration(@Body() body: { autoApprove?: boolean }) {
+    if (typeof body?.autoApprove !== 'boolean') {
+      throw new BadRequestException('autoApprove: boolean required');
+    }
+    const value = body.autoApprove ? 'true' : 'false';
+    await this.prisma.setting.upsert({
+      where: { key: 'moderation.autoApprove' },
+      update: { value },
+      create: {
+        key: 'moderation.autoApprove',
+        value,
+        description: 'Публиковать новые объявления сразу (true) или через модерацию (false)'
+      }
+    });
+    return { autoApprove: body.autoApprove };
+  }
 
   @Get('stats')
   async stats() {

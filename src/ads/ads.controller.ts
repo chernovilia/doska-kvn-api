@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -36,6 +37,12 @@ export class AdsController {
   @Post()
   create(@CurrentUser() userId: string, @Body() dto: CreateAdDto) {
     return this.ads.create(userId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  remove(@CurrentUser() userId: string, @Param('id') id: string) {
+    return this.ads.removeOwn(userId, id);
   }
 }
 

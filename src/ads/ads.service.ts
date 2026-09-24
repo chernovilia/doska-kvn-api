@@ -185,6 +185,25 @@ export class AdsService {
     return { items, total };
   }
 
+  // Юзер удаляет своё объявление. Проверяем что автор совпадает — иначе 403.
+  async removeOwn(userId: string, adId: string) {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { authorId: true }
+    });
+    if (!ad) throw new BadRequestException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    await this.prisma.$transaction([
+      this.prisma.adPhoto.deleteMany({ where: { adId } }),
+      this.prisma.adView.deleteMany({ where: { adId } }),
+      this.prisma.adPromo.deleteMany({ where: { adId } }),
+      this.prisma.favorite.deleteMany({ where: { adId } }),
+      this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: adId } }),
+      this.prisma.ad.delete({ where: { id: adId } })
+    ]);
+    return { ok: true };
+  }
+
   // Все объявления автора — включая pending/rejected/archived.
   // Для страницы «Мои объявления» в кабинете.
   async listMine(userId: string) {
@@ -229,12 +248,27 @@ export class AdsService {
     return ad;
   }
 
+  // Определяет initialStatus нового объявления:
+  // 1) Setting['moderation.autoApprove'] в БД (менеджится админом)
+  // 2) fallback: env AD_AUTOAPPROVE
+  // 3) fallback: approved (MVP-дефолт)
+  private async initialAdStatus(): Promise<AdStatus> {
+    const s = await this.prisma.setting.findUnique({
+      where: { key: 'moderation.autoApprove' }
+    });
+    if (s) return s.value === 'true' ? AdStatus.approved : AdStatus.pending;
+    if (process.env.AD_AUTOAPPROVE === 'false') return AdStatus.pending;
+    return AdStatus.approved;
+  }
+
   async create(userId: string, dto: CreateAdDto) {
     const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });
     if (!city) throw new BadRequestException('Unknown city');
 
     const author = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!author) throw new BadRequestException('Unknown author');
+
+    const status = await this.initialAdStatus();
 
     return this.prisma.ad.create({
       data: {
@@ -260,12 +294,8 @@ export class AdsService {
           verified: author.verified,
           type: author.type
         },
-        // MVP: автопубликация. Флажок AD_AUTOAPPROVE=false → модерация.
-        // Позже подключим ИИ-модерацию — там будет три состояния.
-        status:
-          process.env.AD_AUTOAPPROVE === 'false'
-            ? AdStatus.pending
-            : AdStatus.approved
+        // Определяется через Setting['moderation.autoApprove'] (админка) или env.
+        status
       }
     });
   }
