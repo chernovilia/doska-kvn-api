@@ -140,6 +140,41 @@ model TrustedDevice {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Email-авторизация: одноразовые коды и refresh-токены
+// ─────────────────────────────────────────────────────────────
+
+model EmailCode {
+  id          String   @id @default(uuid())
+  email       String
+  codeHash    String                             // sha256(code) — не храним сам код
+  attempts    Int      @default(0)               // сколько раз пытались ввести
+  expiresAt   DateTime
+  usedAt      DateTime?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  tokenHash   String   @unique                   // sha256(token)
+  deviceId    String?                            // связка с TrustedDevice
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  replacedById String?                           // для ротации: указывает на новый токен
+  createdAt   DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([tokenHash])
+}
+
+// ─────────────────────────────────────────────────────────────
 // Объявления
 // ─────────────────────────────────────────────────────────────
 

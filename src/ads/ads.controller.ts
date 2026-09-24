@@ -10,7 +10,7 @@ import {
 import { AdsService } from './ads.service';
 import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
-import { AuthGuard } from '../auth/auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
 @Controller('ads')
@@ -32,7 +32,7 @@ export class AdsController {
     return this.ads.findById(id);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post()
   create(@CurrentUser() userId: string, @Body() dto: CreateAdDto) {
     return this.ads.create(userId, dto);
