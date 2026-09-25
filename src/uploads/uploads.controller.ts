@@ -7,6 +7,7 @@ import {
   UseInterceptors
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
 import { S3ClientService } from './s3.client';
@@ -33,7 +34,13 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'im
 export class UploadsController {
   constructor(private readonly s3: S3ClientService) {}
 
+  // Rate-limit загрузки фото: 30 в час, 100 в сутки — с запасом на 6-фотных
+  // объявлений (~5 объявлений в час = 30 фото).
   @Post('ad-photo')
+  @Throttle({
+    medium: { limit: 30, ttl: 60 * 60_000 },
+    long: { limit: 100, ttl: 24 * 60 * 60_000 }
+  })
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: MAX_INPUT_MB * 1024 * 1024 }

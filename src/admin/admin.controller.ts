@@ -175,6 +175,25 @@ export class AdminController {
     return { items, total };
   }
 
+  @Get('ads/:id')
+  async adDetail(@Param('id') id: string) {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id },
+      include: {
+        photos: { orderBy: { order: 'asc' } },
+        author: {
+          select: {
+            id: true, email: true, phone: true, name: true, role: true,
+            contactMethod: true, createdAt: true, onboardedAt: true,
+            rating: true, dealsCount: true, homeCityId: true
+          }
+        }
+      }
+    });
+    if (!ad) throw new BadRequestException('Ad not found');
+    return ad;
+  }
+
   @Patch('ads/:id/status')
   async setAdStatus(
     @Param('id') id: string,

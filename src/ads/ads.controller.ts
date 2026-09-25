@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AdsService } from './ads.service';
 import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
@@ -33,7 +34,12 @@ export class AdsController {
     return this.ads.findById(id);
   }
 
+  // Rate-limit создания: 5 объявлений в час, 20 в сутки (антиспам).
   @UseGuards(JwtAuthGuard)
+  @Throttle({
+    medium: { limit: 5, ttl: 60 * 60_000 },
+    long: { limit: 20, ttl: 24 * 60 * 60_000 }
+  })
   @Post()
   create(@CurrentUser() userId: string, @Body() dto: CreateAdDto) {
     return this.ads.create(userId, dto);
