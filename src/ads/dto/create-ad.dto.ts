@@ -1,4 +1,14 @@
-import { IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+  Min,
+  MinLength
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateAdDto {
@@ -48,4 +58,12 @@ export class CreateAdDto {
   @IsOptional()
   @IsString()
   avitoUrl?: string;
+
+  // URLs фото, уже загруженных через POST /uploads/ad-photo.
+  // Порядок в массиве = порядок отображения в галерее (первое — обложка).
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsUrl({}, { each: true })
+  photoUrls?: string[];
 }

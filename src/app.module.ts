@@ -7,6 +7,7 @@ import { RegionsModule } from './regions/regions.module';
 import { AdsModule } from './ads/ads.module';
 import { SeedModule } from './seed/seed.module';
 import { AdminModule } from './admin/admin.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { AdminModule } from './admin/admin.module';
     RegionsModule,
     AdsModule,
     SeedModule,
-    AdminModule
+    AdminModule,
+    UploadsModule
   ]
 })
 export class AppModule {}

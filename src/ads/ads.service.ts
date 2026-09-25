@@ -269,6 +269,7 @@ export class AdsService {
     if (!author) throw new BadRequestException('Unknown author');
 
     const status = await this.initialAdStatus();
+    const photoUrls = (dto.photoUrls || []).slice(0, 10);
 
     return this.prisma.ad.create({
       data: {
@@ -295,8 +296,17 @@ export class AdsService {
           type: author.type
         },
         // Определяется через Setting['moderation.autoApprove'] (админка) или env.
-        status
-      }
+        status,
+        photos: photoUrls.length
+          ? {
+              create: photoUrls.map((url, idx) => ({
+                url,
+                order: idx
+              }))
+            }
+          : undefined
+      },
+      include: { photos: { orderBy: { order: 'asc' } } }
     });
   }
 
