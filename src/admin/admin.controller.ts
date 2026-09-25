@@ -138,12 +138,18 @@ export class AdminController {
   @Get('ads')
   async ads(
     @Query('limit') limit = '100',
-    @Query('offset') offset = '0'
+    @Query('offset') offset = '0',
+    @Query('status') status?: string
   ) {
     const take = Math.min(500, Math.max(1, Number(limit) || 100));
     const skip = Math.max(0, Number(offset) || 0);
+    const allowedStatuses = ['pending', 'approved', 'rejected', 'archived'];
+    const where = status && allowedStatuses.includes(status)
+      ? { status: status as any }
+      : {};
     const [items, total] = await Promise.all([
       this.prisma.ad.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         take,
         skip,
@@ -158,12 +164,32 @@ export class AdminController {
           regionId: true,
           authorId: true,
           authorType: true,
-          createdAt: true
+          createdAt: true,
+          author: {
+            select: { id: true, email: true, name: true }
+          }
         }
       }),
-      this.prisma.ad.count()
+      this.prisma.ad.count({ where })
     ]);
     return { items, total };
+  }
+
+  @Patch('ads/:id/status')
+  async setAdStatus(
+    @Param('id') id: string,
+    @Body() body: { status?: string }
+  ) {
+    const allowed = ['pending', 'approved', 'rejected', 'archived'];
+    if (!body?.status || !allowed.includes(body.status)) {
+      throw new BadRequestException(`status must be one of ${allowed.join(', ')}`);
+    }
+    const ad = await this.prisma.ad.update({
+      where: { id },
+      data: { status: body.status as any },
+      select: { id: true, status: true }
+    });
+    return ad;
   }
 
   @Delete('ads/:id')
