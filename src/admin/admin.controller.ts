@@ -11,6 +11,7 @@ import {
   UseGuards
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3ClientService } from '../uploads/s3.client';
 import { AdminGuard } from './admin.guard';
 
 /**
@@ -23,7 +24,10 @@ import { AdminGuard } from './admin.guard';
 @Controller('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3: S3ClientService
+  ) {}
 
   // ── Модерация ────────────────────────────────────────────────────
   // Ключ Setting: 'moderation.autoApprove' ('true' | 'false').
@@ -213,6 +217,10 @@ export class AdminController {
 
   @Delete('ads/:id')
   async deleteAd(@Param('id') id: string) {
+    const photos = await this.prisma.adPhoto.findMany({
+      where: { adId: id },
+      select: { url: true }
+    });
     await this.prisma.$transaction([
       this.prisma.adPhoto.deleteMany({ where: { adId: id } }),
       this.prisma.adView.deleteMany({ where: { adId: id } }),
@@ -221,11 +229,16 @@ export class AdminController {
       this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: id } }),
       this.prisma.ad.delete({ where: { id } })
     ]);
+    void this.s3.deleteByUrls(photos.map((p) => p.url));
     return { ok: true };
   }
 
   @Delete('users/:id')
   async deleteUser(@Param('id') id: string) {
+    const photos = await this.prisma.adPhoto.findMany({
+      where: { ad: { authorId: id } },
+      select: { url: true }
+    });
     await this.prisma.$transaction([
       this.prisma.adPhoto.deleteMany({ where: { ad: { authorId: id } } }),
       this.prisma.adView.deleteMany({ where: { ad: { authorId: id } } }),
@@ -241,6 +254,7 @@ export class AdminController {
       this.prisma.refreshToken.deleteMany({ where: { userId: id } }),
       this.prisma.user.delete({ where: { id } })
     ]);
+    void this.s3.deleteByUrls(photos.map((p) => p.url));
     return { ok: true };
   }
 
@@ -249,6 +263,7 @@ export class AdminController {
     if (confirm !== 'WIPE_ALL') {
       throw new BadRequestException('Pass ?confirm=WIPE_ALL to proceed');
     }
+    const photos = await this.prisma.adPhoto.findMany({ select: { url: true } });
     const [
       adPhotos, adPromos, adViews, favorites, reports, ads,
       walletTx, wallets, subscriptions, payments, businessProfiles,
@@ -271,6 +286,7 @@ export class AdminController {
       this.prisma.analyticsEvent.deleteMany({}),
       this.prisma.user.deleteMany({})
     ]);
+    void this.s3.deleteByUrls(photos.map((p) => p.url));
     return {
       ok: true,
       deleted: {

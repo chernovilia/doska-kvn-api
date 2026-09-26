@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
 import { AdStatus, Prisma, UserType } from '@prisma/client';
@@ -31,7 +32,10 @@ interface RankingWeights {
 export class AdsService {
   private weightsCache: { data: RankingWeights; expires: number } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3: S3ClientService
+  ) {}
 
   private async getWeights(): Promise<RankingWeights> {
     if (this.weightsCache && this.weightsCache.expires > Date.now()) {
@@ -189,7 +193,7 @@ export class AdsService {
   async removeOwn(userId: string, adId: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
-      select: { authorId: true }
+      select: { authorId: true, photos: { select: { url: true } } }
     });
     if (!ad) throw new BadRequestException('Ad not found');
     if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
@@ -201,6 +205,7 @@ export class AdsService {
       this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: adId } }),
       this.prisma.ad.delete({ where: { id: adId } })
     ]);
+    void this.s3.deleteByUrls(ad.photos.map((p) => p.url));
     return { ok: true };
   }
 

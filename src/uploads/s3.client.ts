@@ -76,11 +76,24 @@ export class S3ClientService implements OnModuleInit {
     return `${this.publicUrlBase}/${params.key}`;
   }
 
-  async deleteObject(key: string): Promise<void> {
+  // Не бросает: вызывается после удаления записей из БД, сбой S3 оставит лишь мусор в бакете.
+  // Поштучно, а не DeleteObjects — пакетный запрос требует checksum-заголовков,
+  // которые S3-совместимые провайдеры принимают не всегда.
+  async deleteByUrls(urls: string[]): Promise<void> {
     if (!this.configured) return;
-    await this.client.send(
-      new DeleteObjectCommand({ Bucket: this.bucket, Key: key })
-    );
+    const keys = urls
+      .map((u) => this.keyFromUrl(u))
+      .filter((k): k is string => !!k);
+    let failed = 0;
+    for (let i = 0; i < keys.length; i += 10) {
+      const results = await Promise.allSettled(
+        keys
+          .slice(i, i + 10)
+          .map((Key) => this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key })))
+      );
+      failed += results.filter((r) => r.status === 'rejected').length;
+    }
+    if (failed) this.logger.warn(`S3: не удалось удалить ${failed} из ${keys.length} объектов`);
   }
 
   // Из публичной ссылки достаём key (для удаления фото по URL).
