@@ -49,9 +49,11 @@ API будет на `http://localhost:3000/v1`.
 |---|---|---|
 | GET | `/ads?place&section&chip&search&limit&offset&sort` | Лента (ранкинг — `ads.service.ts` → `computeScore`) |
 | GET | `/ads/counts?place` | Счётчики по разделам |
+| GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
 | GET | `/ads/:id` | Объявление |
 | POST | `/ads` | Создать (auth; 5/час, 20/сутки; `photoUrls[]` до 10) |
-| DELETE | `/ads/:id` | Удалить своё (auth) |
+| POST | `/ads/:id/bump` | Бесплатно поднять своё опубликованное (auth; пауза `ranking.bump_cooldown_hours`, по умолчанию 72 ч) |
+| DELETE | `/ads/:id` | Удалить своё (auth); фото удаляются из S3 |
 | GET | `/me/ads` | Свои объявления во всех статусах (auth) |
 | POST | `/uploads/ad-photo` | Фото: multipart `file`, до 12 MB → WebP 1600px в S3 (auth; 30/час) |
 
