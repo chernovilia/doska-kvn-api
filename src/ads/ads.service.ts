@@ -310,6 +310,17 @@ export class AdsService {
     });
   }
 
+  // 45 000 — с запасом под лимит протокола sitemap в 50 000 URL на файл.
+  async sitemapEntries() {
+    const items = await this.prisma.ad.findMany({
+      where: { status: AdStatus.approved },
+      select: { id: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 45_000
+    });
+    return { items };
+  }
+
   async countsBySection(place?: string) {
     const placeWhere = await whereForPlace(this.prisma, place);
     const rows = await this.prisma.ad.groupBy({

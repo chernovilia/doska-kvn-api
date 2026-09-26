@@ -29,6 +29,11 @@ export class AdsController {
     return this.ads.countsBySection(place);
   }
 
+  @Get('sitemap')
+  sitemap() {
+    return this.ads.sitemapEntries();
+  }
+
   @Get(':id')
   find(@Param('id') id: string) {
     return this.ads.findById(id);
