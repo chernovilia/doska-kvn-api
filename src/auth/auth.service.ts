@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -68,7 +69,7 @@ export class AuthService {
     const codeHash = this.sha256(code);
     const expiresAt = new Date(Date.now() + EMAIL_CODE_TTL_MIN * 60_000);
 
-    await this.prisma.emailCode.create({
+    const record = await this.prisma.emailCode.create({
       data: {
         email,
         codeHash,
@@ -85,9 +86,12 @@ export class AuthService {
         expiresInMin: EMAIL_CODE_TTL_MIN
       });
     } catch (err) {
-      // Не роняем весь запрос — фронт получит успех, юзер запросит повторно.
-      // Но пишем warning для мониторинга.
-      this.logger.warn(`Email send failed for ${email}: ${(err as Error).message}`);
+      // Код не дошёл — удаляем запись, иначе повторная отправка упрётся в паузу intervalSec.
+      await this.prisma.emailCode.delete({ where: { id: record.id } });
+      this.logger.error(`Email send failed for ${email}: ${(err as Error).message}`);
+      throw new ServiceUnavailableException(
+        'Не удалось отправить письмо. Попробуйте ещё раз через минуту.'
+      );
     }
 
     return {
