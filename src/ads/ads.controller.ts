@@ -51,6 +51,12 @@ export class AdsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/bump')
+  bump(@CurrentUser() userId: string, @Param('id') id: string) {
+    return this.ads.bump(userId, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@CurrentUser() userId: string, @Param('id') id: string) {
     return this.ads.removeOwn(userId, id);

@@ -26,6 +26,7 @@ interface RankingWeights {
   vipTopPositions: number;
   sameAuthorMaxTop10: number;
   boostBonus: number;
+  bumpCooldownHours: number;
 }
 
 @Injectable()
@@ -55,10 +56,46 @@ export class AdsService {
       freshnessDays: parseInt(map['ranking.freshness_days'] ?? '10', 10),
       vipTopPositions: parseInt(map['ranking.vip_top_positions'] ?? '3', 10),
       sameAuthorMaxTop10: parseInt(map['ranking.same_author_max_top10'] ?? '3', 10),
-      boostBonus: parseFloat(map['ranking.boost_bonus'] ?? '0.15')
+      boostBonus: parseFloat(map['ranking.boost_bonus'] ?? '0.15'),
+      bumpCooldownHours: parseInt(map['ranking.bump_cooldown_hours'] ?? '72', 10)
     };
     this.weightsCache = { data: w, expires: Date.now() + 60_000 };
     return w;
+  }
+
+  private nextBumpAt(boostedAt: Date | null, w: RankingWeights): Date | null {
+    if (!boostedAt) return null;
+    return new Date(boostedAt.getTime() + w.bumpCooldownHours * 3_600_000);
+  }
+
+  // Бесплатный подъём: boostedAt = now → +boostBonus в computeScore на 24 часа.
+  async bump(userId: string, adId: string) {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { authorId: true, status: true, boostedAt: true }
+    });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    if (ad.status !== AdStatus.approved) {
+      throw new BadRequestException('Поднять можно только опубликованное объявление');
+    }
+    const w = await this.getWeights();
+    const next = this.nextBumpAt(ad.boostedAt, w);
+    if (next && next.getTime() > Date.now()) {
+      throw new BadRequestException({
+        message: 'Объявление уже поднималось недавно',
+        nextBumpAt: next
+      });
+    }
+    const updated = await this.prisma.ad.update({
+      where: { id: adId },
+      data: { boostedAt: new Date() },
+      select: { boostedAt: true }
+    });
+    return {
+      boostedAt: updated.boostedAt,
+      nextBumpAt: this.nextBumpAt(updated.boostedAt, w)
+    };
   }
 
   private computeScore(ad: any, w: RankingWeights): number {
@@ -219,7 +256,11 @@ export class AdsService {
         photos: { orderBy: { order: 'asc' } }
       }
     });
-    return { items, total: items.length };
+    const w = await this.getWeights();
+    return {
+      items: items.map((a) => ({ ...a, nextBumpAt: this.nextBumpAt(a.boostedAt, w) })),
+      total: items.length
+    };
   }
 
   async findById(id: string) {
@@ -250,7 +291,8 @@ export class AdsService {
       }
     });
     if (!ad) throw new NotFoundException('Ad not found');
-    return ad;
+    const w = await this.getWeights();
+    return { ...ad, nextBumpAt: this.nextBumpAt(ad.boostedAt, w) };
   }
 
   // Определяет initialStatus нового объявления:
