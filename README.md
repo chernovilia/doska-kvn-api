@@ -77,8 +77,10 @@ API будет на `http://localhost:3000/v1`.
 
 ## Деплой на Amvera
 
-Push в `main` → Amvera: `npm install` → `prisma generate` (prebuild) → `npm run build`. Запуск — `npm run start:migrate:prod`, то есть `prisma db push --skip-generate --accept-data-loss && node dist/main`.
+Push в `main` → Amvera: `npm install` → `prisma generate` (prebuild) → `npm run build`. Запуск — `npm run start:migrate:prod`, то есть `prisma db push --skip-generate && node dist/main`.
 
-⚠️ `--accept-data-loss` молча удалит данные, если изменение схемы требует удалить или переименовать колонку. До публичного запуска планируется перейти на `prisma migrate deploy`.
+`db push` сам применяет добавления (таблицы, колонки, индексы). Если изменение схемы удаляет данные (удалить или переименовать колонку, сменить тип, добавить unique на колонку с дублями), он останавливается с ошибкой, и API не стартует. Такое изменение нужно выкатывать вручную: сначала перенести данные, потом менять схему.
+
+Переход на `prisma migrate deploy` отложен: 21.09 он падал на Amvera CNPG с `permission denied to create database`, а проверить его вне прода пока негде.
 
 Переменные окружения — в `.env.example` (полный список с комментариями) и в Amvera → Настройки → Переменные.
