@@ -47,7 +47,7 @@ API будет на `http://localhost:3000/v1`.
 
 | Метод | URL | |
 |---|---|---|
-| GET | `/ads?place&section&chip&search&limit&offset&sort` | Лента (ранкинг — `ads.service.ts` → `computeScore`) |
+| GET | `/ads?place&section&group&chip&search&priceMin&priceMax&limit&offset&sort` | Лента. `section=free` — «Отдам даром» (цена 0 в товарных разделах), `sort`: top (ранкинг — `computeScore`) / recent / cheap / expensive |
 | GET | `/ads/counts?place` | Счётчики по разделам |
 | GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
 | GET | `/ads/:id` | Объявление |
