@@ -12,7 +12,9 @@ async function whereForPlace(prisma: PrismaService, place?: string) {
   if (region) return { regionId: region.id };
   const city = await prisma.city.findUnique({ where: { id: place } });
   if (city) return { cityId: city.id };
-  return {};
+  // Неизвестное место (регион ещё не заведён в БД) — пусто, а не вся доска:
+  // иначе блок «в соседних городах» показывал объявления самого города.
+  return { id: { in: [] } };
 }
 
 // Ранкинг: см. BUSINESS-MODEL.md → «Алгоритм ранкинга».
@@ -166,6 +168,7 @@ export class AdsService {
 
     // Условия через AND: раньше chip и search оба писали в один ключ OR, и chip терялся.
     const and: Prisma.AdWhereInput[] = [];
+    if (q.group) and.push({ categoryGroup: q.group });
     if (q.chip) {
       and.push({
         OR: [

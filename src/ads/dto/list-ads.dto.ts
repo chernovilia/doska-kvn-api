@@ -11,6 +11,11 @@ export class ListAdsDto {
   @IsString()
   section?: string;
 
+  // Подгруппа раздела (categoryGroup): «Вакансии», «Резюме», «Легковые»…
+  @IsOptional()
+  @IsString()
+  group?: string;
+
   @IsOptional()
   @IsString()
   chip?: string;
