@@ -11,16 +11,18 @@ import { AdsModule } from './ads/ads.module';
 import { SeedModule } from './seed/seed.module';
 import { AdminModule } from './admin/admin.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { ChatsModule } from './chats/chats.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    // Три отдельных «ведра» rate-limita: короткий, средний, длинный.
-    // Точечные @Throttle-ы на роутах ссылаются на них по name.
+    // Глобальные лимиты — только от долбёжки: у мобильных операторов много абонентов
+    // за одним IP (CGNAT), а лента на одну загрузку делает несколько запросов.
+    // Строгие лимиты — точечными @Throttle на эндпоинтах, они считаются по userId.
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 60_000, limit: 30 },   // 30 запр/мин на IP (глобально)
-      { name: 'medium', ttl: 60 * 60_000, limit: 300 }, // 300 запр/час
-      { name: 'long', ttl: 24 * 60 * 60_000, limit: 5000 } // 5000 запр/сутки
+      { name: 'short', ttl: 60_000, limit: 300 },
+      { name: 'medium', ttl: 60 * 60_000, limit: 5_000 },
+      { name: 'long', ttl: 24 * 60 * 60_000, limit: 50_000 }
     ]),
     PrismaModule,
     AuthModule,
@@ -29,7 +31,8 @@ import { UploadsModule } from './uploads/uploads.module';
     AdsModule,
     SeedModule,
     AdminModule,
-    UploadsModule
+    UploadsModule,
+    ChatsModule
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }]
 })

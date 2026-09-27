@@ -8,6 +8,14 @@ export interface EmailSender {
     code: string;
     expiresInMin: number;
   }): Promise<void>;
+
+  sendNewMessage(params: {
+    to: string;
+    senderName: string;
+    adTitle: string;
+    preview: string;
+    url: string;
+  }): Promise<void>;
 }
 
 export const EMAIL_SENDER_TOKEN = Symbol('EmailSender');

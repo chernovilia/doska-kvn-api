@@ -17,6 +17,6 @@ import { UnisenderGoSender } from './unisender-go.sender';
       useClass: UnisenderGoSender
     }
   ],
-  exports: [AuthService, JwtAuthGuard]
+  exports: [AuthService, JwtAuthGuard, EMAIL_SENDER_TOKEN]
 })
 export class AuthModule {}
