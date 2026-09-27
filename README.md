@@ -57,6 +57,17 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/me/ads` | Свои объявления во всех статусах (auth) |
 | POST | `/uploads/ad-photo` | Фото: multipart `file`, до 12 MB → WebP 1600px в S3 (auth; 30/час) |
 
+**Сообщения** (только вошедшие; чужой диалог — 404)
+
+| Метод | URL | |
+|---|---|---|
+| GET | `/ads/:id/contact` | Телефон продавца, если он выбрал связь по телефону (30/час) |
+| POST | `/conversations` | `{ adId }` → найти или создать диалог (себе нельзя) |
+| GET | `/conversations` | Список: объявление, собеседник, последнее сообщение, непрочитанные |
+| GET | `/conversations/unread-count` | Непрочитанные для значка |
+| GET | `/conversations/:id/messages?after=` | Сообщения; `after` — только новые (для опроса). Отмечает прочитанным |
+| POST | `/conversations/:id/messages` | `{ text }` 1–2000 символов (20/мин). Письмо получателю — на первое непрочитанное |
+
 **Админка** (`AdminGuard`: `role` admin/owner или email в `ADMIN_EMAILS`)
 
 | Метод | URL | |
@@ -73,7 +84,7 @@ API будет на `http://localhost:3000/v1`.
 
 ## Rate-limit
 
-Глобальный `ThrottlerGuard`: 30 запросов/мин, 300/час, 5000/сутки. Отдельные лимиты — на `POST /ads` и `POST /uploads/ad-photo` (см. таблицу). Счётчики в памяти процесса.
+`AppThrottlerGuard` (ключ — `userId` из access-токена, для гостей `CF-Connecting-IP`): глобально 300 запросов/мин, 5000/час, 50 000/сутки. Строгие лимиты — точечные, на эндпоинтах из таблиц выше. Счётчики в памяти процесса.
 
 ## Деплой на Amvera
 
