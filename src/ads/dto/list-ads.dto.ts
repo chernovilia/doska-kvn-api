@@ -33,6 +33,18 @@ export class ListAdsDto {
   offset?: number = 0;
 
   @IsOptional()
-  @IsIn(['recent', 'top'])
-  sort?: 'recent' | 'top' = 'top';
+  @IsIn(['recent', 'top', 'cheap', 'expensive'])
+  sort?: 'recent' | 'top' | 'cheap' | 'expensive' = 'top';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  priceMin?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  priceMax?: number;
 }

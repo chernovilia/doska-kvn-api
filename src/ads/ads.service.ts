@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
+import { FREE_FROM_SECTIONS, FREE_SECTION } from './sections';
 import { AdStatus, Prisma, UserType } from '@prisma/client';
 
 async function whereForPlace(prisma: PrismaService, place?: string) {
@@ -162,28 +163,78 @@ export class AdsService {
 
   async list(q: ListAdsDto) {
     const placeWhere = await whereForPlace(this.prisma, q.place);
+
+    // Условия через AND: раньше chip и search оба писали в один ключ OR, и chip терялся.
+    const and: Prisma.AdWhereInput[] = [];
+    if (q.chip) {
+      and.push({
+        OR: [
+          { category: { contains: q.chip, mode: 'insensitive' } },
+          { title: { contains: q.chip, mode: 'insensitive' } }
+        ]
+      });
+    }
+    if (q.search) {
+      and.push({
+        OR: [
+          { title: { contains: q.search, mode: 'insensitive' } },
+          { description: { contains: q.search, mode: 'insensitive' } },
+          { address: { contains: q.search, mode: 'insensitive' } }
+        ]
+      });
+    }
+    if (q.priceMin != null || q.priceMax != null) {
+      and.push({
+        price: {
+          ...(q.priceMin != null ? { gte: q.priceMin } : {}),
+          ...(q.priceMax != null ? { lte: q.priceMax } : {})
+        }
+      });
+    }
+
+    const sectionWhere: Prisma.AdWhereInput =
+      q.section === FREE_SECTION
+        ? { price: 0, section: { in: FREE_FROM_SECTIONS } }
+        : q.section
+        ? { section: q.section }
+        : {};
+
     const where: Prisma.AdWhereInput = {
       status: AdStatus.approved,
       ...placeWhere,
-      ...(q.section ? { section: q.section } : {}),
-      ...(q.chip
-        ? {
-            OR: [
-              { category: { contains: q.chip, mode: 'insensitive' } },
-              { title: { contains: q.chip, mode: 'insensitive' } }
-            ]
-          }
-        : {}),
-      ...(q.search
-        ? {
-            OR: [
-              { title: { contains: q.search, mode: 'insensitive' } },
-              { description: { contains: q.search, mode: 'insensitive' } },
-              { address: { contains: q.search, mode: 'insensitive' } }
-            ]
-          }
-        : {})
+      ...sectionWhere,
+      ...(and.length ? { AND: and } : {})
     };
+
+    const include = {
+      author: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true,
+          rating: true,
+          dealsCount: true,
+          type: true,
+          verified: true
+        }
+      },
+      photos: { orderBy: { order: 'asc' as const } }
+    };
+
+    // По цене сортирует сама БД: ранкинг и VIP здесь не применяются.
+    if (q.sort === 'cheap' || q.sort === 'expensive') {
+      const [items, total] = await Promise.all([
+        this.prisma.ad.findMany({
+          where,
+          orderBy: [{ price: q.sort === 'cheap' ? 'asc' : 'desc' }, { createdAt: 'desc' }],
+          skip: q.offset ?? 0,
+          take: q.limit ?? 100,
+          include
+        }),
+        this.prisma.ad.count({ where })
+      ]);
+      return { items, total };
+    }
 
     // Тянем чуть с запасом: score-сортировка + правила потом обрежут.
     const takeRaw = Math.min(300, (q.limit ?? 100) + 100);
@@ -193,20 +244,7 @@ export class AdsService {
         where,
         orderBy: [{ createdAt: 'desc' }], // предварительная сортировка
         take: takeRaw,
-        include: {
-          author: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
-              rating: true,
-              dealsCount: true,
-              type: true,
-              verified: true
-            }
-          },
-          photos: { orderBy: { order: 'asc' } }
-        }
+        include
       }),
       this.prisma.ad.count({ where })
     ]);
@@ -339,6 +377,7 @@ export class AdsService {
         section: dto.section,
         title: dto.title,
         price: dto.price ?? 0,
+        priceTo: dto.priceTo,
         priceSuffix: dto.priceSuffix,
         description: dto.description,
         address: dto.address ?? city.name,

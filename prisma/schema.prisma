@@ -217,6 +217,7 @@ model Ad {
   category        String?
   title           String
   price           Int             @default(0)
+  priceTo         Int?                                    // «зарплата до» у вакансий
   priceSuffix     String?
   description     String?
   address         String

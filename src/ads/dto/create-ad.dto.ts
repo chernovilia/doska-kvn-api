@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -10,6 +11,7 @@ import {
   MinLength
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { SECTION_IDS } from '../sections';
 
 export class CreateAdDto {
   @IsString()
@@ -17,8 +19,7 @@ export class CreateAdDto {
   @MaxLength(200)
   title!: string;
 
-  @IsString()
-  @MinLength(1)
+  @IsIn(SECTION_IDS)
   section!: string;
 
   @IsString()
@@ -37,6 +38,13 @@ export class CreateAdDto {
   @Min(0)
   @IsOptional()
   price?: number = 0;
+
+  // Верхняя граница: «зарплата до» у вакансий.
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  priceTo?: number;
 
   @IsOptional()
   @IsString()
