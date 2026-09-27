@@ -226,6 +226,19 @@ export class AdsService {
     return { items, total };
   }
 
+  // Телефон — только по отдельному запросу авторизованного юзера, чтобы его нельзя было
+  // собрать скриптом из публичной карточки. Отдаём, только если продавец выбрал связь по телефону.
+  async contact(adId: string) {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { phone: true, author: { select: { phone: true, contactMethod: true } } }
+    });
+    if (!ad) throw new NotFoundException('Ad not found');
+    const phone = ad.author.contactMethod === 'phone' ? ad.phone || ad.author.phone : null;
+    if (!phone) throw new NotFoundException('Продавец принимает только сообщения');
+    return { phone };
+  }
+
   // Юзер удаляет своё объявление. Проверяем что автор совпадает — иначе 403.
   async removeOwn(userId: string, adId: string) {
     const ad = await this.prisma.ad.findUnique({
@@ -273,9 +286,12 @@ export class AdsService {
             name: true,
             avatar: true,
             rating: true,
+            reviewsCount: true,
             dealsCount: true,
             type: true,
             verified: true,
+            contactMethod: true,
+            createdAt: true,
             businessProfile: {
               select: {
                 slug: true,

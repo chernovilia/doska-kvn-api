@@ -51,6 +51,13 @@ export class AdsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Throttle({ medium: { limit: 30, ttl: 60 * 60_000 } })
+  @Get(':id/contact')
+  contact(@Param('id') id: string) {
+    return this.ads.contact(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/bump')
   bump(@CurrentUser() userId: string, @Param('id') id: string) {
     return this.ads.bump(userId, id);
