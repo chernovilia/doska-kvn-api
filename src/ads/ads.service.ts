@@ -41,6 +41,44 @@ function sanitizeAttributes(input?: Record<string, unknown>) {
   return keys.length ? out : undefined;
 }
 
+// Фильтр ленты по характеристикам: значение — точное совпадение (варианты из списка),
+// { gte, lte } — диапазон для чисел. Мусор — 400, а не молча пустая лента.
+function attributeFilters(raw?: string): Prisma.AdWhereInput[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException('attr: invalid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new BadRequestException('attr: object expected');
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length > 10) throw new BadRequestException('attr: too many filters');
+  const out: Prisma.AdWhereInput[] = [];
+  for (const [key, value] of entries) {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(key)) throw new BadRequestException(`attr: bad key ${key}`);
+    if (typeof value === 'string' || typeof value === 'number') {
+      if (typeof value === 'string' && value.length > 100) throw new BadRequestException(`attr: too long ${key}`);
+      out.push({ attributes: { path: [key], equals: value } });
+      continue;
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const { gte, lte } = value as { gte?: unknown; lte?: unknown };
+      const num = (n: unknown) => {
+        if (typeof n !== 'number' || !Number.isFinite(n)) throw new BadRequestException(`attr: bad range ${key}`);
+        return n;
+      };
+      if (gte != null) out.push({ attributes: { path: [key], gte: num(gte) } });
+      if (lte != null) out.push({ attributes: { path: [key], lte: num(lte) } });
+      continue;
+    }
+    throw new BadRequestException(`attr: bad value ${key}`);
+  }
+  return out;
+}
+
 // Ранкинг: см. BUSINESS-MODEL.md → «Алгоритм ранкинга».
 // Веса читаются из таблицы Setting и кешируются на 1 минуту.
 interface RankingWeights {
@@ -194,6 +232,7 @@ export class AdsService {
     const and: Prisma.AdWhereInput[] = [];
     if (q.group) and.push({ categoryGroup: q.group });
     if (q.authorId) and.push({ authorId: q.authorId });
+    and.push(...attributeFilters(q.attr));
     if (q.chip) {
       and.push({
         OR: [

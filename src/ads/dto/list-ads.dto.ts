@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ListAdsDto {
@@ -19,6 +19,12 @@ export class ListAdsDto {
   @IsOptional()
   @IsString()
   chip?: string;
+
+  // Фильтр по характеристикам, JSON: {"transmission":"Автомат","year":{"gte":2015,"lte":2020}}.
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  attr?: string;
 
   // Объявления одного продавца (его публичная страница).
   @IsOptional()
