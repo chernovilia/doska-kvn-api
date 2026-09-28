@@ -3,6 +3,8 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsISO8601,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -57,7 +59,18 @@ export class CreateAdDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   address?: string;
+
+  // Характеристики раздела. Форму значений проверяет AdsService.sanitizeAttributes.
+  @IsOptional()
+  @IsObject()
+  attributes?: Record<string, unknown>;
+
+  // Дата и время события (Афиша).
+  @IsOptional()
+  @IsISO8601()
+  eventDate?: string;
 
   @IsOptional()
   @IsString()

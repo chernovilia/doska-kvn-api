@@ -17,6 +17,30 @@ async function whereForPlace(prisma: PrismaService, place?: string) {
   return { id: { in: [] } };
 }
 
+// Характеристики: плоский объект «ключ → строка или число». Набор полей задаёт фронт
+// (data/attributes.js), сервер только не пускает мусор: до 20 полей, короткие значения.
+function sanitizeAttributes(input?: Record<string, unknown>) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const out: Record<string, string | number> = {};
+  for (const [key, raw] of Object.entries(input)) {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(key)) throw new BadRequestException(`Bad attribute: ${key}`);
+    if (raw == null || raw === '') continue;
+    if (typeof raw === 'number') {
+      if (!Number.isFinite(raw) || Math.abs(raw) > 1e9) throw new BadRequestException(`Bad value: ${key}`);
+      out[key] = raw;
+    } else if (typeof raw === 'string') {
+      const v = raw.trim();
+      if (v.length > 100) throw new BadRequestException(`Too long: ${key}`);
+      if (v) out[key] = v;
+    } else {
+      throw new BadRequestException(`Bad value: ${key}`);
+    }
+  }
+  const keys = Object.keys(out);
+  if (keys.length > 20) throw new BadRequestException('Too many attributes');
+  return keys.length ? out : undefined;
+}
+
 // Ранкинг: см. BUSINESS-MODEL.md → «Алгоритм ранкинга».
 // Веса читаются из таблицы Setting и кешируются на 1 минуту.
 interface RankingWeights {
@@ -383,7 +407,9 @@ export class AdsService {
         priceTo: dto.priceTo,
         priceSuffix: dto.priceSuffix,
         description: dto.description,
-        address: dto.address ?? city.name,
+        attributes: sanitizeAttributes(dto.attributes),
+        eventDate: dto.section === 'events' && dto.eventDate ? new Date(dto.eventDate) : undefined,
+        address: dto.address?.trim() || city.name,
         phone: dto.phone,
         avitoUrl: dto.avitoUrl,
         categoryGroup: dto.categoryGroup,
