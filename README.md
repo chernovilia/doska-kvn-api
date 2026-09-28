@@ -4,7 +4,7 @@ Backend для сервиса **Доска/КВН**. Прод: https://api.до�
 
 Стек: **NestJS 10 + TypeScript + Prisma 5 + PostgreSQL**. Фото — Timeweb S3, почта — Unisender Go.
 
-Документация проекта (состояние, roadmap, ранкинг) — в основном репозитории: [STATE.md](https://github.com/chernovilia/doska-kvn/blob/main/STATE.md), [ROADMAP.md](https://github.com/chernovilia/doska-kvn/blob/main/ROADMAP.md), [RANKING-AND-PROMO.md](https://github.com/chernovilia/doska-kvn/blob/main/RANKING-AND-PROMO.md).
+Вся документация проекта — в основном репозитории, папка [`documents/`](https://github.com/chernovilia/doska-kvn/tree/main/documents): состояние, структура, API, админка, ранжирование, дорожная карта.
 
 ## Локальный запуск
 
@@ -109,7 +109,7 @@ API будет на `http://localhost:3000/v1`.
 
 ## Rate-limit
 
-`AppThrottlerGuard` (ключ — `userId` из access-токена, для гостей `CF-Connecting-IP`): глобально 300 запросов/мин, 5000/час, 50 000/сутки. Строгие лимиты — точечные, на эндпоинтах из таблиц выше. Счётчики в памяти процесса.
+`AppThrottlerGuard` (ключ — `userId` из access-токена, для гостей `CF-Connecting-IP` или `req.ip` при `trust proxy 1`): глобально 300 запросов/мин, 5000/час, 50 000/сутки. Строгие лимиты — точечные, на эндпоинтах из таблиц выше. Счётчики в памяти процесса.
 
 ## Деплой на Amvera
 
