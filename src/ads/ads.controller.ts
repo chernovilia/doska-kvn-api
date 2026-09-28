@@ -17,6 +17,7 @@ import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
 import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ViewAdDto } from './dto/view-ad.dto';
+import { ReportAdDto } from './dto/report-ad.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 
 @Controller('ads')
@@ -56,6 +57,13 @@ export class AdsController {
     const sessionId =
       dto.sessionId || 'ip-' + createHash('sha256').update(ip).digest('hex').slice(0, 24);
     return this.ads.registerView(id, { userId: req.userId, sessionId });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ long: { limit: 20, ttl: 24 * 60 * 60_000 } })
+  @Post(':id/report')
+  report(@CurrentUser() userId: string, @Param('id') id: string, @Body() dto: ReportAdDto) {
+    return this.ads.report(userId, id, dto);
   }
 
   // Rate-limit создания: 5 объявлений в час, 20 в сутки (антиспам).

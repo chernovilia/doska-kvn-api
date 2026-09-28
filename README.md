@@ -52,6 +52,7 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
 | GET | `/ads/:id` | Объявление |
 | POST | `/ads/:id/view` | Просмотр страницы: +1 к `viewsCount`, один раз в сутки на пользователя / `sessionId` браузера / хэш IP; автор не считается |
+| POST | `/ads/:id/report` | Жалоба `{ reason: scam \| spam \| illegal \| wrong-category \| sold \| other, comment? }` (auth; 20/сутки; повтор до разбора — не дубль; на своё нельзя) |
 | GET | `/users/:id` | Публичный профиль продавца: имя, аватар, «о себе», город, рейтинг, дата регистрации, число активных объявлений. Почту и телефон не отдаёт |
 | GET | `/favorites` | Избранные объявления (auth; только опубликованные, свежие сверху, до 200) |
 | GET | `/favorites/ids` | id избранного — для сердечек в ленте (auth) |
@@ -85,14 +86,17 @@ API будет на `http://localhost:3000/v1`.
 | Метод | URL | |
 |---|---|---|
 | GET | `/admin/stats` | Счётчики таблиц |
-| GET | `/admin/users?limit&offset` | Пользователи |
+| GET | `/admin/users?limit&offset&q&blocked=1` | Пользователи |
 | DELETE | `/admin/users/:id` | Удалить пользователя с его данными |
-| GET | `/admin/ads?limit&offset&status` | Объявления с фильтром статуса |
+| GET | `/admin/ads?limit&offset&status&q&authorId` | Объявления с фильтром статуса |
 | GET | `/admin/ads/:id` | Объявление с фото и контактами автора |
 | PATCH | `/admin/ads/:id/status` | `{ status: approved / rejected / pending / archived, note? }` — автору уведомление при публикации и отклонении (с причиной) |
 | DELETE | `/admin/ads/:id?reason=` | Удалить объявление, автору — уведомление с причиной |
 | GET | `/admin/reviews` | Последние 200 отзывов |
 | DELETE | `/admin/reviews/:id` | Удалить отзыв, пересчитать рейтинг |
+| GET | `/admin/reports?status=pending` | Жалобы на объявления с объявлением, автором и жалующимся |
+| PATCH | `/admin/reports/:id` | `{ status: resolved \| dismissed }` — закрывает все открытые жалобы на то же объявление |
+| PATCH | `/admin/users/:id/block` | `{ blocked, reason? }` — нельзя публиковать, писать, загружать, оценивать; объявления и страница скрыты, сессии отозваны |
 | GET, PATCH | `/admin/moderation` | Автопубликация вкл/выкл (`Setting['moderation.autoApprove']`) |
 | POST | `/admin/wipe?confirm=WIPE_ALL` | Стереть всех пользователей и объявления |
 

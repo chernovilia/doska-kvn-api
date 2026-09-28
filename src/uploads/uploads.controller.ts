@@ -11,6 +11,8 @@ import { Throttle } from '@nestjs/throttler';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
 import { S3ClientService } from './s3.client';
+import { PrismaService } from '../prisma/prisma.service';
+import { assertNotBlocked } from '../auth/blocked';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 
@@ -32,7 +34,10 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'im
 @Controller('uploads')
 @UseGuards(JwtAuthGuard)
 export class UploadsController {
-  constructor(private readonly s3: S3ClientService) {}
+  constructor(
+    private readonly s3: S3ClientService,
+    private readonly prisma: PrismaService
+  ) {}
 
   // Rate-limit загрузки фото: 30 в час, 100 в сутки — с запасом на 6-фотных
   // объявлений (~5 объявлений в час = 30 фото).
@@ -50,6 +55,7 @@ export class UploadsController {
     @CurrentUser() userId: string,
     @UploadedFile() file?: Express.Multer.File
   ) {
+    await assertNotBlocked(this.prisma, userId);
     if (!this.s3.configured) {
       throw new BadRequestException('S3 не настроен на сервере');
     }

@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { assertNotBlocked } from '../auth/blocked';
 
 const AUTHOR_SELECT = { id: true, name: true, avatar: true } as const;
 
@@ -42,6 +43,7 @@ export class ReviewsService {
   }
 
   async create(userId: string, dto: { conversationId: string; rating: number; text?: string }) {
+    await assertNotBlocked(this.prisma, userId);
     const e = await this.eligibility(userId, dto.conversationId);
     if (e.reason === 'already') throw new ConflictException('Вы уже оставили отзыв по этой переписке');
     if (!e.eligible) throw new ForbiddenException('Отзыв можно оставить, когда вы оба написали в переписке');

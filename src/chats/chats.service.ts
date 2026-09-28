@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException
 } from '@nestjs/common';
+import { assertNotBlocked } from '../auth/blocked';
 import { AdStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EMAIL_SENDER_TOKEN, EmailSender } from '../auth/email-sender.interface';
@@ -31,6 +32,7 @@ export class ChatsService {
 
   // «Написать» по объявлению: находит существующий диалог или создаёт новый.
   async open(userId: string, adId: string) {
+    await assertNotBlocked(this.prisma, userId);
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
       select: {
@@ -170,6 +172,7 @@ export class ChatsService {
   }
 
   async send(userId: string, conversationId: string, rawText: string) {
+    await assertNotBlocked(this.prisma, userId);
     const text = rawText.trim();
     if (!text) throw new BadRequestException('Пустое сообщение');
 

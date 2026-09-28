@@ -8,8 +8,16 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { normalizeSearch } from '../ads/search-text';
+
+function nameVariants(q: string) {
+  const lower = q.toLowerCase();
+  return [...new Set([q, lower, lower.charAt(0).toUpperCase() + lower.slice(1)])];
+}
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { AdminGuard } from './admin.guard';
@@ -66,55 +74,89 @@ export class AdminController {
 
   @Get('stats')
   async stats() {
+    const day = 24 * 60 * 60_000;
+    const week = new Date(Date.now() - 7 * day);
     const [
-      users,
-      ads,
-      approvedAds,
-      pendingAds,
-      adPhotos,
-      businessProfiles,
-      wallets,
-      refreshTokens,
-      emailCodes,
-      subscriptions,
-      payments
+      users, usersNew7d, usersOnboarded, blockedUsers,
+      ads, approvedAds, pendingAds, rejectedAds, adsNew7d,
+      conversations, messages7d, reviews, favorites, views, pendingReports,
+      byCity, daily,
+      adPhotos, refreshTokens, emailCodes
     ] = await Promise.all([
       this.prisma.user.count(),
+      this.prisma.user.count({ where: { createdAt: { gte: week } } }),
+      this.prisma.user.count({ where: { onboardedAt: { not: null } } }),
+      this.prisma.user.count({ where: { blockedAt: { not: null } } }),
       this.prisma.ad.count(),
       this.prisma.ad.count({ where: { status: 'approved' } }),
       this.prisma.ad.count({ where: { status: 'pending' } }),
+      this.prisma.ad.count({ where: { status: 'rejected' } }),
+      this.prisma.ad.count({ where: { createdAt: { gte: week } } }),
+      this.prisma.conversation.count(),
+      this.prisma.message.count({ where: { createdAt: { gte: week } } }),
+      this.prisma.review.count(),
+      this.prisma.favorite.count(),
+      this.prisma.ad.aggregate({ _sum: { viewsCount: true } }),
+      this.prisma.report.count({ where: { status: 'pending' } }),
+      this.prisma.ad.groupBy({ by: ['cityId'], where: { status: 'approved' }, _count: { _all: true } }),
+      // Новые пользователи и объявления по дням за 14 дней (по Москве).
+      this.prisma.$queryRaw<{ day: Date; users: bigint; ads: bigint }[]>`
+        SELECT d.day,
+          (SELECT count(*) FROM "User" u WHERE date_trunc('day', u."createdAt" AT TIME ZONE 'Europe/Moscow') = d.day) AS users,
+          (SELECT count(*) FROM "Ad" a WHERE date_trunc('day', a."createdAt" AT TIME ZONE 'Europe/Moscow') = d.day) AS ads
+        FROM generate_series(
+          date_trunc('day', now() AT TIME ZONE 'Europe/Moscow') - interval '13 days',
+          date_trunc('day', now() AT TIME ZONE 'Europe/Moscow'),
+          interval '1 day'
+        ) AS d(day)
+        ORDER BY d.day`,
       this.prisma.adPhoto.count(),
-      this.prisma.businessProfile.count(),
-      this.prisma.wallet.count(),
       this.prisma.refreshToken.count(),
-      this.prisma.emailCode.count(),
-      this.prisma.subscription.count(),
-      this.prisma.payment.count()
+      this.prisma.emailCode.count()
     ]);
     return {
-      users,
-      ads,
-      approvedAds,
-      pendingAds,
-      adPhotos,
-      businessProfiles,
-      wallets,
-      refreshTokens,
-      emailCodes,
-      subscriptions,
-      payments
+      users, usersNew7d, usersOnboarded, blockedUsers,
+      ads, approvedAds, pendingAds, rejectedAds, adsNew7d,
+      conversations, messages7d, reviews, favorites,
+      views: views._sum.viewsCount ?? 0,
+      pendingReports,
+      byCity: byCity.map((c) => ({ cityId: c.cityId, count: c._count._all })).sort((a, b) => b.count - a.count),
+      daily: daily.map((d) => ({
+        day: d.day.toISOString().slice(0, 10),
+        users: Number(d.users),
+        ads: Number(d.ads)
+      })),
+      tech: { adPhotos, refreshTokens, emailCodes }
     };
   }
 
   @Get('users')
   async users(
     @Query('limit') limit = '100',
-    @Query('offset') offset = '0'
+    @Query('offset') offset = '0',
+    @Query('q') q?: string,
+    @Query('blocked') blocked?: string
   ) {
     const take = Math.min(500, Math.max(1, Number(limit) || 100));
     const skip = Math.max(0, Number(offset) || 0);
+    const query = q?.trim();
+    const where: Prisma.UserWhereInput = {
+      ...(query
+        ? {
+            // Имя: локаль БД — C, ILIKE не складывает кириллицу; пробуем как ввели,
+            // строчными и с заглавной — этого хватает для поиска по имени.
+            OR: [
+              { email: { contains: query, mode: 'insensitive' } },
+              ...nameVariants(query).map((v) => ({ name: { contains: v } })),
+              { id: query }
+            ]
+          }
+        : {}),
+      ...(blocked === '1' ? { blockedAt: { not: null } } : {})
+    };
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         take,
         skip,
@@ -123,6 +165,7 @@ export class AdminController {
           email: true,
           phone: true,
           name: true,
+          avatar: true,
           role: true,
           type: true,
           homeCityId: true,
@@ -133,28 +176,72 @@ export class AdminController {
           createdAt: true,
           lastSeenAt: true,
           blockedAt: true,
+          blockReason: true,
           rating: true,
           reviewsCount: true,
-          dealsCount: true
+          dealsCount: true,
+          _count: { select: { ads: true } }
         }
       }),
-      this.prisma.user.count()
+      this.prisma.user.count({ where })
     ]);
     return { items, total };
+  }
+
+  // Блокировка: не может публиковать, писать, загружать фото и оставлять отзывы;
+  // его объявления и страница скрыты. Разблокировка всё возвращает.
+  @Patch('users/:id/block')
+  async blockUser(
+    @Param('id') id: string,
+    @Body() body: { blocked?: boolean; reason?: string },
+    @Req() req: { userId?: string }
+  ) {
+    if (id === req.userId) throw new BadRequestException('Нельзя заблокировать себя');
+    const target = await this.prisma.user.findUnique({ where: { id }, select: { role: true, email: true } });
+    if (!target) throw new BadRequestException('User not found');
+    const adminEmails = (process.env.ADMIN_EMAILS || '').toLowerCase().split(',').map((e) => e.trim());
+    if (body.blocked && (target.role === 'admin' || target.role === 'owner' || adminEmails.includes((target.email || '').toLowerCase()))) {
+      throw new BadRequestException('Нельзя заблокировать администратора');
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 300) : '';
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: body.blocked
+        ? { blockedAt: new Date(), blockReason: reason || null }
+        : { blockedAt: null, blockReason: null },
+      select: { id: true, blockedAt: true, blockReason: true }
+    });
+    // Разлогиниваем: отзываем refresh-токены заблокированного.
+    if (body.blocked) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() }
+      });
+    }
+    return user;
   }
 
   @Get('ads')
   async ads(
     @Query('limit') limit = '100',
     @Query('offset') offset = '0',
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @Query('q') q?: string,
+    @Query('authorId') authorId?: string
   ) {
     const take = Math.min(500, Math.max(1, Number(limit) || 100));
     const skip = Math.max(0, Number(offset) || 0);
     const allowedStatuses = ['pending', 'approved', 'rejected', 'archived'];
-    const where = status && allowedStatuses.includes(status)
-      ? { status: status as any }
-      : {};
+    const query = q?.trim();
+    const where: Prisma.AdWhereInput = {
+      ...(status && allowedStatuses.includes(status) ? { status: status as any } : {}),
+      ...(authorId ? { authorId } : {}),
+      ...(query
+        ? {
+            OR: [{ searchText: { contains: normalizeSearch(query) } }, { id: query }]
+          }
+        : {})
+    };
     const [items, total] = await Promise.all([
       this.prisma.ad.findMany({
         where,
@@ -165,16 +252,24 @@ export class AdminController {
           id: true,
           title: true,
           section: true,
+          categoryGroup: true,
           category: true,
           price: true,
+          priceTo: true,
+          priceSuffix: true,
           status: true,
+          moderationNotes: true,
           cityId: true,
           regionId: true,
           authorId: true,
           authorType: true,
           createdAt: true,
+          viewsCount: true,
+          favoritesCount: true,
+          reportsCount: true,
+          photos: { orderBy: { order: 'asc' }, take: 1, select: { url: true } },
           author: {
-            select: { id: true, email: true, name: true }
+            select: { id: true, email: true, name: true, blockedAt: true }
           }
         }
       }),
@@ -280,6 +375,54 @@ export class AdminController {
       });
     }
     return { ok: true };
+  }
+
+  // ── Жалобы ───────────────────────────────────────────────────────
+
+  @Get('reports')
+  async reports(@Query('status') status = 'pending') {
+    const allowed = ['pending', 'resolved', 'dismissed'];
+    const items = await this.prisma.report.findMany({
+      where: allowed.includes(status) ? { status: status as any } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        ad: {
+          select: {
+            id: true, title: true, status: true, reportsCount: true,
+            photos: { orderBy: { order: 'asc' }, take: 1, select: { url: true } },
+            author: { select: { id: true, name: true, email: true, blockedAt: true } }
+          }
+        }
+      }
+    });
+    const reporterIds = [...new Set(items.map((r) => r.fromUserId))];
+    const reporters = await this.prisma.user.findMany({
+      where: { id: { in: reporterIds } },
+      select: { id: true, name: true, email: true }
+    });
+    const byId = new Map(reporters.map((u) => [u.id, u]));
+    return { items: items.map((r) => ({ ...r, reporter: byId.get(r.fromUserId) || null })) };
+  }
+
+  // Разобрать жалобу: resolved — меры приняты, dismissed — жалоба не подтвердилась.
+  // Закрывает сразу все открытые жалобы на то же объявление.
+  @Patch('reports/:id')
+  async resolveReport(
+    @Param('id') id: string,
+    @Body() body: { status?: string },
+    @Req() req: { userId?: string }
+  ) {
+    if (!body?.status || !['resolved', 'dismissed'].includes(body.status)) {
+      throw new BadRequestException('status must be resolved or dismissed');
+    }
+    const report = await this.prisma.report.findUnique({ where: { id } });
+    if (!report) throw new BadRequestException('Report not found');
+    const { count } = await this.prisma.report.updateMany({
+      where: { targetKind: report.targetKind, targetId: report.targetId, status: 'pending' },
+      data: { status: body.status as any, resolvedAt: new Date(), resolvedById: req.userId ?? null }
+    });
+    return { ok: true, closed: count };
   }
 
   // ── Отзывы ───────────────────────────────────────────────────────

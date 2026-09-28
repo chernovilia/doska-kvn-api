@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, OnApplicationBootstrap } from '@nestjs/common';
+import { assertNotBlocked } from '../auth/blocked';
+import { buildSearchText, normalizeSearch } from './search-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
@@ -95,7 +97,9 @@ interface RankingWeights {
 }
 
 @Injectable()
-export class AdsService {
+export class AdsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(AdsService.name);
+
   private weightsCache: { data: RankingWeights; expires: number } | null = null;
 
   constructor(
@@ -126,6 +130,20 @@ export class AdsService {
     };
     this.weightsCache = { data: w, expires: Date.now() + 60_000 };
     return w;
+  }
+
+  // Объявлениям без searchText (созданы до поля) строим его при старте — их немного,
+  // а новые получают поле сразу при создании.
+  async onApplicationBootstrap() {
+    const rows = await this.prisma.ad.findMany({
+      where: { searchText: null },
+      select: { id: true, title: true, description: true, address: true, categoryGroup: true, category: true, attributes: true },
+      take: 5000
+    });
+    for (const ad of rows) {
+      await this.prisma.ad.update({ where: { id: ad.id }, data: { searchText: buildSearchText(ad) } });
+    }
+    if (rows.length) this.logger.log(`searchText заполнен у ${rows.length} объявлений`);
   }
 
   private nextBumpAt(boostedAt: Date | null, w: RankingWeights): Date | null {
@@ -241,14 +259,8 @@ export class AdsService {
         ]
       });
     }
-    if (q.search) {
-      and.push({
-        OR: [
-          { title: { contains: q.search, mode: 'insensitive' } },
-          { description: { contains: q.search, mode: 'insensitive' } },
-          { address: { contains: q.search, mode: 'insensitive' } }
-        ]
-      });
+    if (q.search?.trim()) {
+      and.push({ searchText: { contains: normalizeSearch(q.search) } });
     }
     if (q.priceMin != null || q.priceMax != null) {
       and.push({
@@ -268,6 +280,7 @@ export class AdsService {
 
     const where: Prisma.AdWhereInput = {
       status: AdStatus.approved,
+      author: { blockedAt: null }, // объявления заблокированных не показываем
       ...placeWhere,
       ...sectionWhere,
       ...(and.length ? { AND: and } : {})
@@ -397,6 +410,7 @@ export class AdsService {
             verified: true,
             contactMethod: true,
             createdAt: true,
+            blockedAt: true,
             businessProfile: {
               select: {
                 slug: true,
@@ -411,9 +425,10 @@ export class AdsService {
         region: true
       }
     });
-    if (!ad) throw new NotFoundException('Ad not found');
+    if (!ad || ad.author.blockedAt) throw new NotFoundException('Ad not found');
+    const { blockedAt: _blocked, ...author } = ad.author;
     const w = await this.getWeights();
-    return { ...ad, nextBumpAt: this.nextBumpAt(ad.boostedAt, w) };
+    return { ...ad, author, nextBumpAt: this.nextBumpAt(ad.boostedAt, w) };
   }
 
   // Определяет initialStatus нового объявления:
@@ -430,6 +445,7 @@ export class AdsService {
   }
 
   async create(userId: string, dto: CreateAdDto) {
+    await assertNotBlocked(this.prisma, userId);
     const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });
     if (!city) throw new BadRequestException('Unknown city');
 
@@ -448,6 +464,7 @@ export class AdsService {
         priceSuffix: dto.priceSuffix,
         description: dto.description,
         attributes: sanitizeAttributes(dto.attributes),
+        searchText: buildSearchText({ ...dto, attributes: sanitizeAttributes(dto.attributes) }),
         eventDate: dto.section === 'events' && dto.eventDate ? new Date(dto.eventDate) : undefined,
         address: dto.address?.trim() || city.name,
         phone: dto.phone,
@@ -524,6 +541,29 @@ export class AdsService {
       })
     ]);
     return { viewsCount: updated.viewsCount, counted: true };
+  }
+
+  // Жалоба на объявление. Повторная жалоба того же пользователя, пока первая не разобрана, — не дубль.
+  async report(userId: string, adId: string, dto: { reason: string; comment?: string }) {
+    const ad = await this.prisma.ad.findUnique({ where: { id: adId }, select: { authorId: true } });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId === userId) throw new BadRequestException('Нельзя пожаловаться на своё объявление');
+    const existing = await this.prisma.report.findFirst({
+      where: { fromUserId: userId, targetKind: 'ad', targetId: adId, status: 'pending' },
+      select: { id: true }
+    });
+    if (existing) return { ok: true };
+    await this.prisma.report.create({
+      data: {
+        fromUserId: userId,
+        targetKind: 'ad',
+        targetId: adId,
+        reason: dto.reason,
+        comment: dto.comment?.trim() || null
+      }
+    });
+    await this.prisma.ad.update({ where: { id: adId }, data: { reportsCount: { increment: 1 } } });
+    return { ok: true };
   }
 
   async countsBySection(place?: string) {

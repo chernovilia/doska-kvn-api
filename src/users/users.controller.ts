@@ -23,14 +23,15 @@ export class UsersController {
         reviewsCount: true,
         homeCityId: true,
         createdAt: true,
-        onboardedAt: true
+        onboardedAt: true,
+        blockedAt: true
       }
     });
-    if (!user || !user.onboardedAt) throw new NotFoundException('User not found');
+    if (!user || !user.onboardedAt || user.blockedAt) throw new NotFoundException('User not found');
     const activeAdsCount = await this.prisma.ad.count({
       where: { authorId: id, status: AdStatus.approved }
     });
-    const { onboardedAt: _hidden, ...rest } = user;
+    const { onboardedAt: _hidden, blockedAt: _blocked, ...rest } = user;
     return { ...rest, activeAdsCount };
   }
 }

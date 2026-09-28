@@ -223,6 +223,7 @@ model Ad {
   priceTo         Int?                                    // «зарплата до» у вакансий
   priceSuffix     String?
   description     String?
+  searchText      String? // заголовок, описание, адрес, категория, характеристики — в нижнем регистре, см. ads/search-text.ts
   attributes      Json?                                   // характеристики раздела: {brand, year, mileage…}, см. data/attributes.js на фронте
   address         String
   phone           String?
