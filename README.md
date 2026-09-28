@@ -51,6 +51,7 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/ads/counts?place` | Счётчики по разделам |
 | GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
 | GET | `/ads/:id` | Объявление |
+| POST | `/ads/:id/view` | Просмотр страницы: +1 к `viewsCount`, один раз в сутки на пользователя / `sessionId` браузера / хэш IP; автор не считается |
 | POST | `/ads` | Создать (auth; 5/час, 20/сутки; `photoUrls[]` до 10) |
 | POST | `/ads/:id/bump` | Бесплатно поднять своё опубликованное (auth; пауза `ranking.bump_cooldown_hours`, по умолчанию 72 ч) |
 | DELETE | `/ads/:id` | Удалить своё (auth); фото удаляются из S3 |

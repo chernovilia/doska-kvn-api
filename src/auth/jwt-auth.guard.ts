@@ -47,3 +47,27 @@ export class JwtAuthGuard implements CanActivate {
     }
   }
 }
+
+/**
+ * Необязательная авторизация: гостя пропускает, вошедшему проставляет req.userId.
+ * Для эндпоинтов, которые работают у всех, но учитывают пользователя (просмотры).
+ */
+@Injectable()
+export class OptionalJwtAuthGuard implements CanActivate {
+  constructor(private readonly auth: AuthService) {}
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx
+      .switchToHttp()
+      .getRequest<Request & { userId?: string; cookies?: Record<string, string> }>();
+    const token = req.cookies?.access_token;
+    if (!token) return true;
+    try {
+      const { userId } = await this.auth.verifyAccessToken(token);
+      req.userId = userId;
+    } catch {
+      // Протухший токен — считаем гостем.
+    }
+    return true;
+  }
+}

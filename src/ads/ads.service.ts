@@ -426,6 +426,40 @@ export class AdsService {
     return { items };
   }
 
+  // Счётчик просмотров: +1, если этот зритель не открывал объявление последние 24 часа.
+  // Автор свои просмотры не накручивает.
+  async registerView(adId: string, viewer: { userId?: string; sessionId: string }) {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { authorId: true, status: true, viewsCount: true }
+    });
+    if (!ad || ad.status !== AdStatus.approved) throw new NotFoundException('Ad not found');
+    if (viewer.userId && viewer.userId === ad.authorId) {
+      return { viewsCount: ad.viewsCount, counted: false };
+    }
+
+    const since = new Date(Date.now() - 24 * 60 * 60_000);
+    const seen = await this.prisma.adView.findFirst({
+      where: viewer.userId
+        ? { adId, userId: viewer.userId, at: { gte: since } }
+        : { adId, sessionId: viewer.sessionId, at: { gte: since } },
+      select: { id: true }
+    });
+    if (seen) return { viewsCount: ad.viewsCount, counted: false };
+
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.adView.create({
+        data: { adId, userId: viewer.userId ?? null, sessionId: viewer.sessionId, source: 'page' }
+      }),
+      this.prisma.ad.update({
+        where: { id: adId },
+        data: { viewsCount: { increment: 1 } },
+        select: { viewsCount: true }
+      })
+    ]);
+    return { viewsCount: updated.viewsCount, counted: true };
+  }
+
   async countsBySection(place?: string) {
     const placeWhere = await whereForPlace(this.prisma, place);
     const rows = await this.prisma.ad.groupBy({

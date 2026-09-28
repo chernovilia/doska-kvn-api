@@ -6,13 +6,17 @@ import {
   Param,
   Post,
   Query,
+  Req,
   UseGuards
 } from '@nestjs/common';
+import { Request } from 'express';
+import { createHash } from 'crypto';
 import { Throttle } from '@nestjs/throttler';
 import { AdsService } from './ads.service';
 import { ListAdsDto } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard, OptionalJwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ViewAdDto } from './dto/view-ad.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 
 @Controller('ads')
@@ -37,6 +41,21 @@ export class AdsController {
   @Get(':id')
   find(@Param('id') id: string) {
     return this.ads.findById(id);
+  }
+
+  // Просмотр страницы объявления. Один раз в сутки на пользователя / браузер / IP.
+  @UseGuards(OptionalJwtAuthGuard)
+  @Post(':id/view')
+  view(
+    @Req() req: Request & { userId?: string },
+    @Param('id') id: string,
+    @Body() dto: ViewAdDto
+  ) {
+    const ip = (req.headers['cf-connecting-ip'] as string) || req.ip || '';
+    // Гость без localStorage (приватный режим) — по хэшу IP, сам IP не храним.
+    const sessionId =
+      dto.sessionId || 'ip-' + createHash('sha256').update(ip).digest('hex').slice(0, 24);
+    return this.ads.registerView(id, { userId: req.userId, sessionId });
   }
 
   // Rate-limit создания: 5 объявлений в час, 20 в сутки (антиспам).
