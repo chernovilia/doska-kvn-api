@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmailSender } from './email-sender.interface';
-import { renderAuthCodeEmail, renderNewMessageEmail } from './email-template';
+import { renderAuthCodeEmail, renderNewMessageEmail, renderNotificationEmail } from './email-template';
 
 /**
  * Реализация EmailSender через Unisender Go API.
@@ -50,6 +50,20 @@ export class UnisenderGoSender implements EmailSender {
       return;
     }
     await this.send(params.to, renderNewMessageEmail(params), 'new message');
+  }
+
+  async sendNotification(params: {
+    to: string;
+    title: string;
+    body?: string | null;
+    url: string;
+    cta: string;
+  }): Promise<void> {
+    if (!this.apiKey) {
+      this.logger.warn(`UNISENDER_GO_API_KEY не задан — уведомление для ${params.to} не отправлено`);
+      return;
+    }
+    await this.send(params.to, renderNotificationEmail(params), 'notification');
   }
 
   private async send(

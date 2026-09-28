@@ -16,6 +16,15 @@ export interface EmailSender {
     preview: string;
     url: string;
   }): Promise<void>;
+
+  // Уведомление сервиса: «объявление опубликовано», «новый отзыв» и т.п.
+  sendNotification(params: {
+    to: string;
+    title: string;
+    body?: string | null;
+    url: string;
+    cta: string;
+  }): Promise<void>;
 }
 
 export const EMAIL_SENDER_TOKEN = Symbol('EmailSender');

@@ -57,6 +57,12 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/favorites/ids` | id избранного — для сердечек в ленте (auth) |
 | POST | `/favorites/:adId` | Добавить (auth; повтор — не ошибка; своё нельзя) |
 | DELETE | `/favorites/:adId` | Убрать (auth) |
+| GET | `/users/:id/reviews` | Отзывы о пользователе (публично, до 100, свежие сверху) |
+| GET | `/conversations/:id/review` | Можно ли оставить отзыв по диалогу: `{ eligible, reason: 'no_dialog' \| 'already' \| null, review }` (auth) |
+| POST | `/reviews` | Отзыв `{ conversationId, rating 1–5, text? до 1000 }`: только участник диалога, где писали оба, один на диалог; пересчитывает `rating`/`reviewsCount`, уведомляет (auth; 20/сутки) |
+| GET | `/notifications` | Последние 50 уведомлений (auth) |
+| GET | `/notifications/unread-count` | Непрочитанные (auth; опрос раз в минуту) |
+| POST | `/notifications/read-all` · `/notifications/:id/read` | Прочитать все / одно (auth) |
 | POST | `/ads` | Создать (auth; 5/час, 20/сутки; `photoUrls[]` до 10; `attributes` — плоский объект характеристик, до 20 полей; `eventDate` — у афиши) |
 | POST | `/ads/:id/bump` | Бесплатно поднять своё опубликованное (auth; пауза `ranking.bump_cooldown_hours`, по умолчанию 72 ч) |
 | DELETE | `/ads/:id` | Удалить своё (auth); фото удаляются из S3 |
@@ -83,8 +89,10 @@ API будет на `http://localhost:3000/v1`.
 | DELETE | `/admin/users/:id` | Удалить пользователя с его данными |
 | GET | `/admin/ads?limit&offset&status` | Объявления с фильтром статуса |
 | GET | `/admin/ads/:id` | Объявление с фото и контактами автора |
-| PATCH | `/admin/ads/:id/status` | `approved` / `rejected` / `pending` / `archived` |
-| DELETE | `/admin/ads/:id` | Удалить объявление |
+| PATCH | `/admin/ads/:id/status` | `{ status: approved / rejected / pending / archived, note? }` — автору уведомление при публикации и отклонении (с причиной) |
+| DELETE | `/admin/ads/:id?reason=` | Удалить объявление, автору — уведомление с причиной |
+| GET | `/admin/reviews` | Последние 200 отзывов |
+| DELETE | `/admin/reviews/:id` | Удалить отзыв, пересчитать рейтинг |
 | GET, PATCH | `/admin/moderation` | Автопубликация вкл/выкл (`Setting['moderation.autoApprove']`) |
 | POST | `/admin/wipe?confirm=WIPE_ALL` | Стереть всех пользователей и объявления |
 

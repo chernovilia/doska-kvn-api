@@ -146,3 +146,62 @@ export function renderNewMessageEmail(params: {
 
   return { html, plaintext, subject };
 }
+
+// Общее письмо-уведомление: заголовок, пара строк текста и кнопка на сайт.
+export function renderNotificationEmail(params: {
+  title: string;
+  body?: string | null;
+  url: string;
+  cta: string;
+  brandUrl?: string;
+}): { html: string; plaintext: string; subject: string } {
+  const { url, cta, brandUrl = 'https://xn----7sbhf4acwc1a.xn--p1ai' } = params;
+  const body = params.body ? (params.body.length > 500 ? `${params.body.slice(0, 500)}…` : params.body) : '';
+  const subject = params.title;
+
+  const plaintext = [
+    params.title,
+    ...(body ? ['', body] : []),
+    '',
+    `${cta}: ${url}`,
+    '',
+    'Уведомления на почту можно отключить в настройках профиля.',
+    `Доска/КВН — ${brandUrl}`
+  ].join('\n');
+
+  const html = `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <meta name="color-scheme" content="light dark">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f6f7fb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+  <div style="max-width:520px;margin:0 auto;padding:32px 20px;">
+    <div style="text-align:center;margin-bottom:24px;">
+      <a href="${brandUrl}" style="text-decoration:none;color:#0f172a;font-weight:900;font-size:24px;letter-spacing:-0.5px;">
+        Доска<span style="color:#f97316;">/</span>КВН
+      </a>
+    </div>
+
+    <div style="background:#ffffff;border-radius:16px;padding:24px;box-shadow:0 2px 10px -4px rgba(15,23,42,0.10);">
+      <div style="font-size:18px;font-weight:800;line-height:1.35;margin-bottom:${body ? '10px' : '0'};">${escapeHtml(params.title)}</div>
+      ${body ? `<div style="font-size:15px;line-height:1.6;color:#334155;white-space:pre-wrap;">${escapeHtml(body)}</div>` : ''}
+      <div style="text-align:center;margin-top:20px;">
+        <a href="${url}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px;">
+          ${escapeHtml(cta)}
+        </a>
+      </div>
+    </div>
+
+    <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
+      Уведомления на почту можно отключить в настройках профиля.<br>
+      <a href="${brandUrl}" style="color:#4f46e5;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return { html, plaintext, subject };
+}

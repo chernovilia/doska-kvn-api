@@ -13,6 +13,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { AdminGuard } from './admin.guard';
+import { NotificationsService } from '../notifications/notifications.service';
+import { ReviewsService } from '../reviews/reviews.service';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -26,7 +28,9 @@ import { AdminGuard } from './admin.guard';
 export class AdminController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3ClientService
+    private readonly s3: S3ClientService,
+    private readonly notifications: NotificationsService,
+    private readonly reviews: ReviewsService
   ) {}
 
   // ── Модерация ────────────────────────────────────────────────────
@@ -201,22 +205,57 @@ export class AdminController {
   @Patch('ads/:id/status')
   async setAdStatus(
     @Param('id') id: string,
-    @Body() body: { status?: string }
+    @Body() body: { status?: string; note?: string }
   ) {
     const allowed = ['pending', 'approved', 'rejected', 'archived'];
     if (!body?.status || !allowed.includes(body.status)) {
       throw new BadRequestException(`status must be one of ${allowed.join(', ')}`);
     }
+    const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+    const before = await this.prisma.ad.findUnique({
+      where: { id },
+      select: { status: true, authorId: true, title: true }
+    });
+    if (!before) throw new BadRequestException('Ad not found');
     const ad = await this.prisma.ad.update({
       where: { id },
-      data: { status: body.status as any },
-      select: { id: true, status: true }
+      data: {
+        status: body.status as any,
+        moderationNotes: note || null,
+        publishedAt: body.status === 'approved' ? new Date() : undefined
+      },
+      select: { id: true, status: true, moderationNotes: true }
     });
+
+    // Автору — только о смене статуса, повторное «одобрить» не шлёт письмо ещё раз.
+    if (before.status !== body.status) {
+      if (body.status === 'approved') {
+        await this.notifications.notify(before.authorId, {
+          type: 'ad_approved',
+          title: `Объявление опубликовано: «${before.title}»`,
+          body: 'Его уже видят в ленте.',
+          link: `/ad/${id}`,
+          cta: 'Открыть объявление'
+        });
+      } else if (body.status === 'rejected') {
+        await this.notifications.notify(before.authorId, {
+          type: 'ad_rejected',
+          title: `Объявление отклонено: «${before.title}»`,
+          body: note ? `Причина: ${note}` : 'Оно не прошло модерацию. Проверьте правила и подайте заново.',
+          link: `/ad/${id}`,
+          cta: 'Посмотреть'
+        });
+      }
+    }
     return ad;
   }
 
   @Delete('ads/:id')
-  async deleteAd(@Param('id') id: string) {
+  async deleteAd(@Param('id') id: string, @Query('reason') reason?: string) {
+    const target = await this.prisma.ad.findUnique({
+      where: { id },
+      select: { authorId: true, title: true }
+    });
     const photos = await this.prisma.adPhoto.findMany({
       where: { adId: id },
       select: { url: true }
@@ -230,11 +269,39 @@ export class AdminController {
       this.prisma.ad.delete({ where: { id } })
     ]);
     void this.s3.deleteByUrls(photos.map((p) => p.url));
+    if (target) {
+      const why = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
+      await this.notifications.notify(target.authorId, {
+        type: 'ad_removed',
+        title: `Объявление удалено модератором: «${target.title}»`,
+        body: why ? `Причина: ${why}` : 'Оно нарушало правила площадки.',
+        link: '/terms',
+        cta: 'Правила площадки'
+      });
+    }
     return { ok: true };
+  }
+
+  // ── Отзывы ───────────────────────────────────────────────────────
+
+  @Get('reviews')
+  listReviews() {
+    return this.reviews.adminList();
+  }
+
+  @Delete('reviews/:id')
+  deleteReview(@Param('id') id: string) {
+    return this.reviews.adminDelete(id);
   }
 
   @Delete('users/:id')
   async deleteUser(@Param('id') id: string) {
+    // Отзывы пользователя удалятся каскадом — рейтинги тех, о ком он писал, пересчитаем.
+    const reviewedTargets = await this.prisma.review.findMany({
+      where: { authorId: id },
+      select: { targetId: true },
+      distinct: ['targetId']
+    });
     const photos = await this.prisma.adPhoto.findMany({
       where: { ad: { authorId: id } },
       select: { url: true }
@@ -256,6 +323,7 @@ export class AdminController {
       this.prisma.user.delete({ where: { id } })
     ]);
     void this.s3.deleteByUrls(photos.map((p) => p.url));
+    for (const r of reviewedTargets) await this.reviews.recompute(r.targetId);
     return { ok: true };
   }
 
