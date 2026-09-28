@@ -276,7 +276,8 @@ export class SeedService implements OnModuleInit {
       ['ranking.freshness_days', '10', 'За сколько дней свежесть падает до 0'],
       ['ranking.vip_top_positions', '3', 'Позиций сверху зарезервировано под VIP'],
       ['ranking.same_author_max_top10', '3', 'Максимум объявлений одного автора в топ-10'],
-      ['ranking.boost_bonus', '0.15', 'Бонус к score после Поднятия (24ч)'],
+      ['ranking.boost_bonus', '0.15', 'Бонус к score первые 24 ч после публикации и после подъёма'],
+      ['ranking.bump_cooldown_days', '10', 'Через сколько дней после публикации или подъёма можно поднять снова'],
       ['ranking.archive_days', '30', 'Дней до отправки в архив'],
 
       // Модерация
@@ -298,9 +299,10 @@ export class SeedService implements OnModuleInit {
       ['signup.opened', 'true', 'Открыта ли регистрация']
     ];
     for (const [key, value, description] of settings) {
+      // Значение не перезаписываем: его меняют в админке, и деплой не должен его сбрасывать.
       await this.prisma.setting.upsert({
         where: { key },
-        update: { value, description },
+        update: { description },
         create: { key, value, description }
       });
     }

@@ -50,7 +50,7 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/ads?place&section&group&authorId&attr&chip&search&priceMin&priceMax&limit&offset&sort` | Лента. `attr` — JSON фильтров по характеристикам: `{"rooms":"2","area":{"gte":40}}` (до 10 полей). `section=free` — «Отдам даром» (цена 0 в товарных разделах), `sort`: top (ранкинг — `computeScore`) / recent / cheap / expensive |
 | GET | `/ads/counts?place` | Счётчики по разделам |
 | GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
-| GET | `/ads/:id` | Объявление |
+| GET | `/ads/:id` | Объявление с автором и фото. Неопубликованные (pending, rejected, hidden) — только автору и админам, причину модерации видят только они; `nextBumpAt` — когда можно поднять |
 | POST | `/ads/:id/view` | Просмотр страницы: +1 к `viewsCount`, один раз в сутки на пользователя / `sessionId` браузера / хэш IP; автор не считается |
 | POST | `/ads/:id/report` | Жалоба `{ reason: scam \| spam \| illegal \| wrong-category \| sold \| other, comment? }` (auth; 20/сутки; повтор до разбора — не дубль; на своё нельзя) |
 | GET | `/users/:id` | Публичный профиль продавца: имя, аватар, «о себе», город, рейтинг, дата регистрации, число активных объявлений. Почту и телефон не отдаёт |
@@ -64,6 +64,9 @@ API будет на `http://localhost:3000/v1`.
 | GET | `/notifications` | Последние 50 уведомлений (auth) |
 | GET | `/notifications/unread-count` | Непрочитанные (auth; опрос раз в минуту) |
 | POST | `/notifications/read-all` · `/notifications/:id/read` | Прочитать все / одно (auth) |
+| GET | `/support` | Мои обращения с перепиской (auth) |
+| POST | `/support` | Новое обращение `{ topic: question \| problem \| complaint \| idea, text 5–2000 }` — админам уведомление (auth; 10/сутки; можно и заблокированным) |
+| POST | `/support/:id/messages` | Написать в своё обращение `{ text }` — возвращает его в очередь (auth) |
 | POST | `/ads` | Создать (auth; 5/час, 20/сутки; `photoUrls[]` до 10; `attributes` — плоский объект характеристик, до 20 полей; `eventDate` — у афиши) |
 | POST | `/ads/:id/bump` | Бесплатно поднять своё опубликованное (auth; пауза `ranking.bump_cooldown_hours`, по умолчанию 72 ч) |
 | DELETE | `/ads/:id` | Удалить своё (auth); фото удаляются из S3 |
@@ -90,13 +93,17 @@ API будет на `http://localhost:3000/v1`.
 | DELETE | `/admin/users/:id` | Удалить пользователя с его данными |
 | GET | `/admin/ads?limit&offset&status&q&authorId` | Объявления с фильтром статуса |
 | GET | `/admin/ads/:id` | Объявление с фото и контактами автора |
-| PATCH | `/admin/ads/:id/status` | `{ status: approved / rejected / pending / archived, note? }` — автору уведомление при публикации и отклонении (с причиной) |
+| PATCH | `/admin/ads/:id/status` | `{ status: pending \| approved \| rejected \| hidden, note? }`. `hidden` — скрыть опубликованное из ленты и поиска; автору уведомление с причиной о каждом переходе; возврат скрытого не сбрасывает дату публикации |
 | DELETE | `/admin/ads/:id?reason=` | Удалить объявление, автору — уведомление с причиной |
 | GET | `/admin/reviews` | Последние 200 отзывов |
 | DELETE | `/admin/reviews/:id` | Удалить отзыв, пересчитать рейтинг |
 | GET | `/admin/reports?status=pending` | Жалобы на объявления с объявлением, автором и жалующимся |
 | PATCH | `/admin/reports/:id` | `{ status: resolved \| dismissed }` — закрывает все открытые жалобы на то же объявление |
 | PATCH | `/admin/users/:id/block` | `{ blocked, reason? }` — нельзя публиковать, писать, загружать, оценивать; объявления и страница скрыты, сессии отозваны |
+| GET / PATCH | `/admin/settings` | Настройки ленты и модерации: автопубликация, через сколько дней можно поднять, бонус новым, свежесть, веса ранжирования. PATCH `{ key, value }` с проверкой диапазона |
+| GET | `/admin/support?status=open` | Обращения в поддержку с перепиской и автором |
+| POST | `/admin/support/:id/reply` | Ответ `{ text }` → статус answered, пользователю уведомление и письмо |
+| PATCH | `/admin/support/:id` | `{ status: open \| answered \| closed }` |
 | GET, PATCH | `/admin/moderation` | Автопубликация вкл/выкл (`Setting['moderation.autoApprove']`) |
 | POST | `/admin/wipe?confirm=WIPE_ALL` | Стереть всех пользователей и объявления |
 

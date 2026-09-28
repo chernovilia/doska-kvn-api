@@ -14,6 +14,42 @@ import {
 import { Prisma } from '@prisma/client';
 import { normalizeSearch } from '../ads/search-text';
 
+// Настройки, которыми управляет админка. default — если записи в БД ещё нет.
+const MANAGED_SETTINGS: Record<
+  string,
+  { label: string; hint: string; type: 'bool' | 'number'; default: string; min: number; max: number; step?: number }
+> = {
+  'moderation.autoApprove': {
+    label: 'Автопубликация',
+    hint: 'Выключено — новые объявления ждут одобрения в админке',
+    type: 'bool', default: 'true', min: 0, max: 1
+  },
+  'ranking.bump_cooldown_days': {
+    label: 'Поднять можно через, дней',
+    hint: 'После публикации или прошлого подъёма',
+    type: 'number', default: '10', min: 1, max: 90, step: 1
+  },
+  'ranking.boost_bonus': {
+    label: 'Бонус новым и поднятым',
+    hint: 'Прибавка к рейтингу на 24 часа; 0.15 ≈ сразу в топ',
+    type: 'number', default: '0.15', min: 0, max: 1, step: 0.05
+  },
+  'ranking.freshness_days': {
+    label: 'Свежесть, дней',
+    hint: 'За сколько дней объявление «стареет» до нуля',
+    type: 'number', default: '10', min: 1, max: 90, step: 1
+  },
+  'ranking.weight.freshness': { label: 'Вес: свежесть', hint: '', type: 'number', default: '0.35', min: 0, max: 1, step: 0.05 },
+  'ranking.weight.quality': { label: 'Вес: качество (фото, описание)', hint: '', type: 'number', default: '0.10', min: 0, max: 1, step: 0.05 },
+  'ranking.weight.trust': { label: 'Вес: доверие к автору', hint: 'Рейтинг и проверка', type: 'number', default: '0.15', min: 0, max: 1, step: 0.05 },
+  'ranking.weight.engagement': { label: 'Вес: интерес (просмотры)', hint: '', type: 'number', default: '0.10', min: 0, max: 1, step: 0.05 },
+  'ranking.same_author_max_top10': {
+    label: 'Макс. объявлений одного автора в топ-10',
+    hint: 'Чтобы один продавец не занял всю ленту',
+    type: 'number', default: '3', min: 1, max: 10, step: 1
+  }
+};
+
 function nameVariants(q: string) {
   const lower = q.toLowerCase();
   return [...new Set([q, lower, lower.charAt(0).toUpperCase() + lower.slice(1)])];
@@ -23,6 +59,7 @@ import { S3ClientService } from '../uploads/s3.client';
 import { AdminGuard } from './admin.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { SupportService } from '../support/support.service';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -38,7 +75,8 @@ export class AdminController {
     private readonly prisma: PrismaService,
     private readonly s3: S3ClientService,
     private readonly notifications: NotificationsService,
-    private readonly reviews: ReviewsService
+    private readonly reviews: ReviewsService,
+    private readonly support: SupportService
   ) {}
 
   // ── Модерация ────────────────────────────────────────────────────
@@ -78,8 +116,8 @@ export class AdminController {
     const week = new Date(Date.now() - 7 * day);
     const [
       users, usersNew7d, usersOnboarded, blockedUsers,
-      ads, approvedAds, pendingAds, rejectedAds, adsNew7d,
-      conversations, messages7d, reviews, favorites, views, pendingReports,
+      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, adsNew7d,
+      conversations, messages7d, reviews, favorites, views, pendingReports, openTickets,
       byCity, daily,
       adPhotos, refreshTokens, emailCodes
     ] = await Promise.all([
@@ -91,6 +129,7 @@ export class AdminController {
       this.prisma.ad.count({ where: { status: 'approved' } }),
       this.prisma.ad.count({ where: { status: 'pending' } }),
       this.prisma.ad.count({ where: { status: 'rejected' } }),
+      this.prisma.ad.count({ where: { status: 'hidden' } }),
       this.prisma.ad.count({ where: { createdAt: { gte: week } } }),
       this.prisma.conversation.count(),
       this.prisma.message.count({ where: { createdAt: { gte: week } } }),
@@ -98,6 +137,7 @@ export class AdminController {
       this.prisma.favorite.count(),
       this.prisma.ad.aggregate({ _sum: { viewsCount: true } }),
       this.prisma.report.count({ where: { status: 'pending' } }),
+      this.prisma.supportTicket.count({ where: { status: 'open' } }),
       this.prisma.ad.groupBy({ by: ['cityId'], where: { status: 'approved' }, _count: { _all: true } }),
       // Новые пользователи и объявления по дням за 14 дней (по Москве).
       this.prisma.$queryRaw<{ day: Date; users: bigint; ads: bigint }[]>`
@@ -116,10 +156,11 @@ export class AdminController {
     ]);
     return {
       users, usersNew7d, usersOnboarded, blockedUsers,
-      ads, approvedAds, pendingAds, rejectedAds, adsNew7d,
+      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, adsNew7d,
       conversations, messages7d, reviews, favorites,
       views: views._sum.viewsCount ?? 0,
       pendingReports,
+      openTickets,
       byCity: byCity.map((c) => ({ cityId: c.cityId, count: c._count._all })).sort((a, b) => b.count - a.count),
       daily: daily.map((d) => ({
         day: d.day.toISOString().slice(0, 10),
@@ -231,7 +272,7 @@ export class AdminController {
   ) {
     const take = Math.min(500, Math.max(1, Number(limit) || 100));
     const skip = Math.max(0, Number(offset) || 0);
-    const allowedStatuses = ['pending', 'approved', 'rejected', 'archived'];
+    const allowedStatuses = ['pending', 'approved', 'rejected', 'hidden'];
     const query = q?.trim();
     const where: Prisma.AdWhereInput = {
       ...(status && allowedStatuses.includes(status) ? { status: status as any } : {}),
@@ -297,19 +338,21 @@ export class AdminController {
     return ad;
   }
 
+  // Статусы: pending → approved | rejected; approved → hidden (скрыть из ленты и поиска);
+  // hidden | rejected → approved (вернуть). Автору — уведомление о каждом переходе.
   @Patch('ads/:id/status')
   async setAdStatus(
     @Param('id') id: string,
     @Body() body: { status?: string; note?: string }
   ) {
-    const allowed = ['pending', 'approved', 'rejected', 'archived'];
+    const allowed = ['pending', 'approved', 'rejected', 'hidden'];
     if (!body?.status || !allowed.includes(body.status)) {
       throw new BadRequestException(`status must be one of ${allowed.join(', ')}`);
     }
     const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
     const before = await this.prisma.ad.findUnique({
       where: { id },
-      select: { status: true, authorId: true, title: true }
+      select: { status: true, authorId: true, title: true, publishedAt: true }
     });
     if (!before) throw new BadRequestException('Ad not found');
     const ad = await this.prisma.ad.update({
@@ -317,18 +360,22 @@ export class AdminController {
       data: {
         status: body.status as any,
         moderationNotes: note || null,
-        publishedAt: body.status === 'approved' ? new Date() : undefined
+        // Дата первой публикации: возврат скрытого не поднимает его как новое.
+        publishedAt: body.status === 'approved' && !before.publishedAt ? new Date() : undefined
       },
       select: { id: true, status: true, moderationNotes: true }
     });
 
-    // Автору — только о смене статуса, повторное «одобрить» не шлёт письмо ещё раз.
     if (before.status !== body.status) {
+      const reason = note ? `Причина: ${note}` : null;
       if (body.status === 'approved') {
+        const firstTime = before.status === 'pending';
         await this.notifications.notify(before.authorId, {
           type: 'ad_approved',
-          title: `Объявление опубликовано: «${before.title}»`,
-          body: 'Его уже видят в ленте.',
+          title: firstTime
+            ? `Объявление опубликовано: «${before.title}»`
+            : `Объявление снова в ленте: «${before.title}»`,
+          body: 'Его уже видят в ленте и поиске.',
           link: `/ad/${id}`,
           cta: 'Открыть объявление'
         });
@@ -336,7 +383,15 @@ export class AdminController {
         await this.notifications.notify(before.authorId, {
           type: 'ad_rejected',
           title: `Объявление отклонено: «${before.title}»`,
-          body: note ? `Причина: ${note}` : 'Оно не прошло модерацию. Проверьте правила и подайте заново.',
+          body: reason || 'Оно не прошло модерацию. Проверьте правила и подайте заново.',
+          link: `/ad/${id}`,
+          cta: 'Посмотреть'
+        });
+      } else if (body.status === 'hidden') {
+        await this.notifications.notify(before.authorId, {
+          type: 'ad_hidden',
+          title: `Объявление скрыто модератором: «${before.title}»`,
+          body: `${reason ? `${reason}\n` : ''}Его не видно в ленте и поиске. Если это ошибка — напишите в поддержку.`,
           link: `/ad/${id}`,
           cta: 'Посмотреть'
         });
@@ -375,6 +430,66 @@ export class AdminController {
       });
     }
     return { ok: true };
+  }
+
+  // ── Настройки ленты и модерации ──────────────────────────────────
+  // Только перечисленные ключи; значение проверяется по диапазону. Лента подхватывает
+  // новые веса в течение минуты (кеш в AdsService).
+
+  @Get('settings')
+  async getSettings() {
+    const rows = await this.prisma.setting.findMany({
+      where: { key: { in: Object.keys(MANAGED_SETTINGS) } }
+    });
+    const byKey = new Map(rows.map((r) => [r.key, r.value]));
+    return {
+      items: Object.entries(MANAGED_SETTINGS).map(([key, def]) => ({
+        key,
+        ...def,
+        value: byKey.get(key) ?? def.default
+      }))
+    };
+  }
+
+  @Patch('settings')
+  async setSetting(@Body() body: { key?: string; value?: string | number | boolean }) {
+    const def = body?.key ? MANAGED_SETTINGS[body.key] : undefined;
+    if (!def || body.value == null) throw new BadRequestException('Unknown setting');
+    let value: string;
+    if (def.type === 'bool') {
+      value = body.value === true || body.value === 'true' ? 'true' : 'false';
+    } else {
+      const n = Number(body.value);
+      if (!Number.isFinite(n) || n < def.min || n > def.max) {
+        throw new BadRequestException(`${def.label}: от ${def.min} до ${def.max}`);
+      }
+      value = String(n);
+    }
+    await this.prisma.setting.upsert({
+      where: { key: body.key! },
+      update: { value },
+      create: { key: body.key!, value, description: def.label }
+    });
+    return { key: body.key, value };
+  }
+
+  // ── Поддержка ────────────────────────────────────────────────────
+
+  @Get('support')
+  listSupport(@Query('status') status?: string) {
+    return this.support.adminList(status);
+  }
+
+  @Post('support/:id/reply')
+  replySupport(@Param('id') id: string, @Body() body: { text?: string }) {
+    const text = typeof body?.text === 'string' ? body.text.trim() : '';
+    if (!text || text.length > 2000) throw new BadRequestException('Текст ответа: 1–2000 символов');
+    return this.support.adminReply(id, text);
+  }
+
+  @Patch('support/:id')
+  setSupportStatus(@Param('id') id: string, @Body() body: { status?: string }) {
+    return this.support.adminSetStatus(id, body?.status || '');
   }
 
   // ── Жалобы ───────────────────────────────────────────────────────

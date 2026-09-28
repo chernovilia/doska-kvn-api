@@ -16,6 +16,7 @@ import { FavoritesModule } from './favorites/favorites.module';
 import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -40,7 +41,8 @@ import { ReviewsModule } from './reviews/reviews.module';
     FavoritesModule,
     UsersModule,
     NotificationsModule,
-    ReviewsModule
+    ReviewsModule,
+    SupportModule
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }]
 })

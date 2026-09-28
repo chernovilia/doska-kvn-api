@@ -4,7 +4,15 @@ import { EMAIL_SENDER_TOKEN, EmailSender } from '../auth/email-sender.interface'
 
 const SITE_URL = process.env.FRONTEND_URL || 'https://xn----7sbhf4acwc1a.xn--p1ai';
 
-export type NotificationType = 'ad_approved' | 'ad_rejected' | 'ad_removed' | 'review_new';
+export type NotificationType =
+  | 'ad_approved'
+  | 'ad_rejected'
+  | 'ad_hidden'
+  | 'ad_removed'
+  | 'ad_pending'
+  | 'review_new'
+  | 'support_new'
+  | 'support_reply';
 
 @Injectable()
 export class NotificationsService {

@@ -39,9 +39,10 @@ export class AdsController {
     return this.ads.sitemapEntries();
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  find(@Param('id') id: string) {
-    return this.ads.findById(id);
+  find(@Param('id') id: string, @Req() req: Request & { userId?: string }) {
+    return this.ads.findById(id, req.userId);
   }
 
   // Просмотр страницы объявления. Один раз в сутки на пользователя / браузер / IP.

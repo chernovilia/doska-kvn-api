@@ -114,6 +114,7 @@ model User {
   reviewsWritten  Review[]       @relation("ReviewAuthor")
   reviewsReceived Review[]       @relation("ReviewTarget")
   notifications   Notification[]
+  supportTickets  SupportTicket[]
 
   @@index([role])
   @@index([type])
@@ -690,4 +691,31 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
+}
+
+// Обращение в поддержку: пользователь пишет из «Помощь», админ отвечает в админке.
+// Переписка — SupportMessage; ответ админа уведомляет пользователя, новое сообщение — админов.
+model SupportTicket {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic     String // question | problem | complaint | idea
+  status    String           @default("open") // open — ждёт ответа, answered — ответили, closed — закрыто
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  messages  SupportMessage[]
+
+  @@index([status, updatedAt(sort: Desc)])
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model SupportMessage {
+  id        String        @id @default(uuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fromAdmin Boolean       @default(false)
+  text      String
+  createdAt DateTime      @default(now())
+
+  @@index([ticketId, createdAt])
 }

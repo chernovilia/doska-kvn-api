@@ -1,5 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, OnApplicationBootstrap } from '@nestjs/common';
 import { assertNotBlocked } from '../auth/blocked';
+import { adminUserIds, isAdminUser } from '../auth/admin-check';
+import { NotificationsService } from '../notifications/notifications.service';
 import { buildSearchText, normalizeSearch } from './search-text';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
@@ -93,7 +95,7 @@ interface RankingWeights {
   vipTopPositions: number;
   sameAuthorMaxTop10: number;
   boostBonus: number;
-  bumpCooldownHours: number;
+  bumpCooldownDays: number;
 }
 
 @Injectable()
@@ -104,7 +106,8 @@ export class AdsService implements OnApplicationBootstrap {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3ClientService
+    private readonly s3: S3ClientService,
+    private readonly notifications: NotificationsService
   ) {}
 
   private async getWeights(): Promise<RankingWeights> {
@@ -126,7 +129,7 @@ export class AdsService implements OnApplicationBootstrap {
       vipTopPositions: parseInt(map['ranking.vip_top_positions'] ?? '3', 10),
       sameAuthorMaxTop10: parseInt(map['ranking.same_author_max_top10'] ?? '3', 10),
       boostBonus: parseFloat(map['ranking.boost_bonus'] ?? '0.15'),
-      bumpCooldownHours: parseInt(map['ranking.bump_cooldown_hours'] ?? '72', 10)
+      bumpCooldownDays: parseFloat(map['ranking.bump_cooldown_days'] ?? '10')
     };
     this.weightsCache = { data: w, expires: Date.now() + 60_000 };
     return w;
@@ -144,18 +147,31 @@ export class AdsService implements OnApplicationBootstrap {
       await this.prisma.ad.update({ where: { id: ad.id }, data: { searchText: buildSearchText(ad) } });
     }
     if (rows.length) this.logger.log(`searchText заполнен у ${rows.length} объявлений`);
+
+    // Опубликованным до появления publishedAt — дата создания, иначе они выпали бы из свежести.
+    const { count } = await this.prisma.$executeRaw`
+      UPDATE "Ad" SET "publishedAt" = "createdAt" WHERE status = 'approved' AND "publishedAt" IS NULL`.then((n) => ({ count: n }));
+    if (count) this.logger.log(`publishedAt заполнен у ${count} объявлений`);
   }
 
-  private nextBumpAt(boostedAt: Date | null, w: RankingWeights): Date | null {
-    if (!boostedAt) return null;
-    return new Date(boostedAt.getTime() + w.bumpCooldownHours * 3_600_000);
+  // Поднять можно через bumpCooldownDays после публикации или прошлого подъёма.
+  private nextBumpAt(
+    ad: { status?: string; publishedAt?: Date | null; createdAt: Date; boostedAt: Date | null },
+    w: RankingWeights
+  ): Date | null {
+    if (ad.status && ad.status !== AdStatus.approved) return null;
+    const from = Math.max(
+      new Date(ad.publishedAt ?? ad.createdAt).getTime(),
+      ad.boostedAt ? new Date(ad.boostedAt).getTime() : 0
+    );
+    return new Date(from + w.bumpCooldownDays * 24 * 3_600_000);
   }
 
   // Бесплатный подъём: boostedAt = now → +boostBonus в computeScore на 24 часа.
   async bump(userId: string, adId: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
-      select: { authorId: true, status: true, boostedAt: true }
+      select: { authorId: true, status: true, boostedAt: true, publishedAt: true, createdAt: true }
     });
     if (!ad) throw new NotFoundException('Ad not found');
     if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
@@ -163,27 +179,29 @@ export class AdsService implements OnApplicationBootstrap {
       throw new BadRequestException('Поднять можно только опубликованное объявление');
     }
     const w = await this.getWeights();
-    const next = this.nextBumpAt(ad.boostedAt, w);
+    const next = this.nextBumpAt(ad, w);
     if (next && next.getTime() > Date.now()) {
       throw new BadRequestException({
-        message: 'Объявление уже поднималось недавно',
+        message: 'Поднять пока нельзя',
         nextBumpAt: next
       });
     }
     const updated = await this.prisma.ad.update({
       where: { id: adId },
       data: { boostedAt: new Date() },
-      select: { boostedAt: true }
+      select: { boostedAt: true, publishedAt: true, createdAt: true, status: true }
     });
     return {
       boostedAt: updated.boostedAt,
-      nextBumpAt: this.nextBumpAt(updated.boostedAt, w)
+      nextBumpAt: this.nextBumpAt(updated, w)
     };
   }
 
   private computeScore(ad: any, w: RankingWeights): number {
     const now = Date.now();
-    const hours = (now - new Date(ad.createdAt).getTime()) / 3_600_000;
+    // Свежесть — от публикации: объявление, которое ждало модерацию, не должно «стареть» в очереди.
+    const published = new Date(ad.publishedAt ?? ad.createdAt).getTime();
+    const hours = (now - published) / 3_600_000;
     const freshness = Math.max(0, 1 - hours / (24 * w.freshnessDays));
 
     const promo = (ad.promoLevel || 0) / 4;
@@ -207,11 +225,9 @@ export class AdsService implements OnApplicationBootstrap {
       quality * w.quality +
       engagement * w.engagement;
 
-    // Boost 24 часа
-    if (ad.boostedAt) {
-      const boostHours = (now - new Date(ad.boostedAt).getTime()) / 3_600_000;
-      if (boostHours < 24) score += w.boostBonus;
-    }
+    // Первые 24 часа после публикации или подъёма — бонус: новое объявление сразу наверху.
+    const lift = Math.max(published, ad.boostedAt ? new Date(ad.boostedAt).getTime() : 0);
+    if ((now - lift) / 3_600_000 < 24) score += w.boostBonus;
     return score;
   }
 
@@ -322,7 +338,7 @@ export class AdsService implements OnApplicationBootstrap {
     const [rawItems, total] = await Promise.all([
       this.prisma.ad.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }], // предварительная сортировка
+        orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }], // предварительная сортировка
         take: takeRaw,
         include
       }),
@@ -332,7 +348,7 @@ export class AdsService implements OnApplicationBootstrap {
     // Ранкинг: либо recent (по дате), либо top (по score).
     let sorted;
     if (q.sort === 'recent') {
-      sorted = rawItems; // уже отсортированы по createdAt DESC
+      sorted = rawItems; // уже отсортированы по дате публикации
     } else {
       const w = await this.getWeights();
       const withScore = rawItems.map((a) => ({ ...a, _score: this.computeScore(a, w) }));
@@ -389,12 +405,14 @@ export class AdsService implements OnApplicationBootstrap {
     });
     const w = await this.getWeights();
     return {
-      items: items.map((a) => ({ ...a, nextBumpAt: this.nextBumpAt(a.boostedAt, w) })),
+      items: items.map((a) => ({ ...a, nextBumpAt: this.nextBumpAt(a, w) })),
       total: items.length
     };
   }
 
-  async findById(id: string) {
+  // Неопубликованные (на модерации, отклонённые, скрытые) видят только автор и админы;
+  // причину модерации — тоже только они.
+  async findById(id: string, viewerId?: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id },
       include: {
@@ -426,9 +444,16 @@ export class AdsService implements OnApplicationBootstrap {
       }
     });
     if (!ad || ad.author.blockedAt) throw new NotFoundException('Ad not found');
+    const privileged = viewerId === ad.authorId || (await isAdminUser(this.prisma, viewerId));
+    if (ad.status !== AdStatus.approved && !privileged) throw new NotFoundException('Ad not found');
     const { blockedAt: _blocked, ...author } = ad.author;
     const w = await this.getWeights();
-    return { ...ad, author, nextBumpAt: this.nextBumpAt(ad.boostedAt, w) };
+    return {
+      ...ad,
+      moderationNotes: privileged ? ad.moderationNotes : null,
+      author,
+      nextBumpAt: this.nextBumpAt(ad, w)
+    };
   }
 
   // Определяет initialStatus нового объявления:
@@ -455,7 +480,7 @@ export class AdsService implements OnApplicationBootstrap {
     const status = await this.initialAdStatus();
     const photoUrls = (dto.photoUrls || []).slice(0, 10);
 
-    return this.prisma.ad.create({
+    const created = await this.prisma.ad.create({
       data: {
         section: dto.section,
         title: dto.title,
@@ -485,6 +510,7 @@ export class AdsService implements OnApplicationBootstrap {
         },
         // Определяется через Setting['moderation.autoApprove'] (админка) или env.
         status,
+        publishedAt: status === AdStatus.approved ? new Date() : null,
         photos: photoUrls.length
           ? {
               create: photoUrls.map((url, idx) => ({
@@ -496,6 +522,21 @@ export class AdsService implements OnApplicationBootstrap {
       },
       include: { photos: { orderBy: { order: 'asc' } } }
     });
+
+    // Автопубликация выключена — зовём админов в очередь модерации.
+    if (created.status === AdStatus.pending) {
+      for (const adminId of await adminUserIds(this.prisma)) {
+        if (adminId === userId) continue;
+        await this.notifications.notify(adminId, {
+          type: 'ad_pending',
+          title: `На модерации: «${created.title}»`,
+          body: `${author.name || 'Пользователь'} подал объявление — оно ждёт проверки.`,
+          link: '/admin?tab=ads&status=pending',
+          cta: 'Проверить'
+        });
+      }
+    }
+    return created;
   }
 
   // 45 000 — с запасом под лимит протокола sitemap в 50 000 URL на файл.
