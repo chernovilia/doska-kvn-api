@@ -12,6 +12,8 @@ import { SeedModule } from './seed/seed.module';
 import { AdminModule } from './admin/admin.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ChatsModule } from './chats/chats.module';
+import { FavoritesModule } from './favorites/favorites.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -32,7 +34,9 @@ import { ChatsModule } from './chats/chats.module';
     SeedModule,
     AdminModule,
     UploadsModule,
-    ChatsModule
+    ChatsModule,
+    FavoritesModule,
+    UsersModule
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }]
 })

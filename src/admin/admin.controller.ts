@@ -244,6 +244,7 @@ export class AdminController {
       this.prisma.adView.deleteMany({ where: { ad: { authorId: id } } }),
       this.prisma.adPromo.deleteMany({ where: { ad: { authorId: id } } }),
       this.prisma.favorite.deleteMany({ where: { ad: { authorId: id } } }),
+      this.prisma.favorite.deleteMany({ where: { userId: id } }),
       this.prisma.report.deleteMany({ where: { fromUserId: id } }),
       this.prisma.ad.deleteMany({ where: { authorId: id } }),
       this.prisma.walletTransaction.deleteMany({ where: { wallet: { userId: id } } }),

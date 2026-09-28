@@ -193,6 +193,7 @@ export class AdsService {
     // Условия через AND: раньше chip и search оба писали в один ключ OR, и chip терялся.
     const and: Prisma.AdWhereInput[] = [];
     if (q.group) and.push({ categoryGroup: q.group });
+    if (q.authorId) and.push({ authorId: q.authorId });
     if (q.chip) {
       and.push({
         OR: [

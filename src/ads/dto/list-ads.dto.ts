@@ -20,6 +20,11 @@ export class ListAdsDto {
   @IsString()
   chip?: string;
 
+  // Объявления одного продавца (его публичная страница).
+  @IsOptional()
+  @IsString()
+  authorId?: string;
+
   @IsOptional()
   @IsString()
   search?: string;

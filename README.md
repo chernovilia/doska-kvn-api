@@ -47,11 +47,16 @@ API будет на `http://localhost:3000/v1`.
 
 | Метод | URL | |
 |---|---|---|
-| GET | `/ads?place&section&group&chip&search&priceMin&priceMax&limit&offset&sort` | Лента. `section=free` — «Отдам даром» (цена 0 в товарных разделах), `sort`: top (ранкинг — `computeScore`) / recent / cheap / expensive |
+| GET | `/ads?place&section&group&authorId&chip&search&priceMin&priceMax&limit&offset&sort` | Лента. `section=free` — «Отдам даром» (цена 0 в товарных разделах), `sort`: top (ранкинг — `computeScore`) / recent / cheap / expensive |
 | GET | `/ads/counts?place` | Счётчики по разделам |
 | GET | `/ads/sitemap` | id и дата всех одобренных — для sitemap.xml фронта |
 | GET | `/ads/:id` | Объявление |
 | POST | `/ads/:id/view` | Просмотр страницы: +1 к `viewsCount`, один раз в сутки на пользователя / `sessionId` браузера / хэш IP; автор не считается |
+| GET | `/users/:id` | Публичный профиль продавца: имя, аватар, «о себе», город, рейтинг, дата регистрации, число активных объявлений. Почту и телефон не отдаёт |
+| GET | `/favorites` | Избранные объявления (auth; только опубликованные, свежие сверху, до 200) |
+| GET | `/favorites/ids` | id избранного — для сердечек в ленте (auth) |
+| POST | `/favorites/:adId` | Добавить (auth; повтор — не ошибка; своё нельзя) |
+| DELETE | `/favorites/:adId` | Убрать (auth) |
 | POST | `/ads` | Создать (auth; 5/час, 20/сутки; `photoUrls[]` до 10; `attributes` — плоский объект характеристик, до 20 полей; `eventDate` — у афиши) |
 | POST | `/ads/:id/bump` | Бесплатно поднять своё опубликованное (auth; пауза `ranking.bump_cooldown_hours`, по умолчанию 72 ч) |
 | DELETE | `/ads/:id` | Удалить своё (auth); фото удаляются из S3 |
