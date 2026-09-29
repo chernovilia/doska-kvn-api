@@ -467,11 +467,19 @@ export class AdminController {
   // Диагностика: какой IP сервер видит у админа. Должен совпасть с настоящим
   // адресом — иначе лимиты запросов считаются по адресу прокси, общему для всех.
   @Get('whoami')
-  whoami(@Req() req: { ip?: string; headers: Record<string, unknown> }) {
+  whoami(@Req() req: { ip?: string; ips?: string[]; socket?: { remoteAddress?: string }; headers: Record<string, unknown> }) {
+    // Все заголовки, в которых прокси могут передавать адрес клиента, — чтобы понять,
+    // откуда брать настоящий IP за прокси Amvera. Только для админа.
+    const ipHeaders = Object.fromEntries(
+      Object.entries(req.headers).filter(([k]) => /forward|real|client|via|envoy|cf-|true-|ip/i.test(k))
+    );
     return {
       ip: req.ip ?? null,
+      ips: req.ips ?? [],
+      socket: req.socket?.remoteAddress ?? null,
       forwardedFor: req.headers['x-forwarded-for'] ?? null,
-      realIp: req.headers['x-real-ip'] ?? null
+      realIp: req.headers['x-real-ip'] ?? null,
+      ipHeaders
     };
   }
 
