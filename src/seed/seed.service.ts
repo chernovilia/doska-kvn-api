@@ -287,6 +287,10 @@ export class SeedService implements OnModuleInit {
       ['moderation.llm.enabled', 'false', 'LLM-модерация через GigaChat'],
       ['moderation.llm.provider', 'gigachat', 'Провайдер LLM'],
 
+      // Отзывы
+      ['reviews.min_messages', '4', 'Сообщений от каждой стороны, чтобы оставить отзыв'],
+      ['reviews.min_hours', '1', 'Часов с первого сообщения, чтобы оставить отзыв'],
+
       // Мессенджер
       ['messages.rateLimit.perMinute', '30', 'Сообщений в минуту'],
 

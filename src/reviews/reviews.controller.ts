@@ -19,8 +19,8 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard)
   @Get('conversations/:id/review')
   async eligibility(@CurrentUser() userId: string, @Param('id') id: string) {
-    const { eligible, reason, review } = await this.reviews.eligibility(userId, id);
-    return { eligible, reason, review };
+    const { eligible, reason, review, need, mine, theirs, readyAt } = await this.reviews.eligibility(userId, id);
+    return { eligible, reason, review, need, mine, theirs, readyAt };
   }
 
   @UseGuards(JwtAuthGuard)

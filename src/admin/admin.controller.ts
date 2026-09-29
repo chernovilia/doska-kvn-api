@@ -24,6 +24,16 @@ const MANAGED_SETTINGS: Record<
     hint: 'Выключено — новые объявления ждут одобрения в админке',
     type: 'bool', default: 'true', min: 0, max: 1
   },
+  'reviews.min_messages': {
+    label: 'Отзыв: сообщений от каждого',
+    hint: 'Сколько сообщений должен написать каждый в переписке, чтобы оценить друг друга',
+    type: 'number', default: '4', min: 1, max: 30, step: 1
+  },
+  'reviews.min_hours': {
+    label: 'Отзыв: часов с начала переписки',
+    hint: 'Не раньше этого времени после первого сообщения',
+    type: 'number', default: '1', min: 0, max: 72, step: 1
+  },
   'ranking.bump_cooldown_days': {
     label: 'Поднять можно через, дней',
     hint: 'После публикации или прошлого подъёма',

@@ -2,6 +2,13 @@ import { ConflictException, ForbiddenException, Injectable, NotFoundException } 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { assertNotBlocked } from '../auth/blocked';
+import { readNumberSettings } from '../settings/read-settings';
+
+function messagesWord(n: number) {
+  const m10 = n % 10, m100 = n % 100;
+  const w = m10 === 1 && m100 !== 11 ? 'сообщение' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'сообщения' : 'сообщений';
+  return `${n} ${w}`;
+}
 
 const AUTHOR_SELECT = { id: true, name: true, avatar: true } as const;
 
@@ -13,8 +20,10 @@ export class ReviewsService {
   ) {}
 
   /**
-   * Можно ли оставить отзыв по диалогу: пользователь — участник, писали оба,
-   * и своего отзыва по этому диалогу ещё нет. Возвращает и уже оставленный отзыв.
+   * Можно ли оставить отзыв по диалогу: пользователь — участник, каждый написал не меньше
+   * reviews.min_messages сообщений, с первого сообщения прошло reviews.min_hours часов,
+   * и своего отзыва по этому диалогу ещё нет. Так отзыв оставляют после настоящего общения,
+   * а не после «здравствуйте». Возвращает и уже оставленный отзыв, и прогресс для подсказки в чате.
    */
   async eligibility(userId: string, conversationId: string) {
     const conv = await this.prisma.conversation.findUnique({
@@ -25,20 +34,42 @@ export class ReviewsService {
       throw new NotFoundException('Conversation not found');
     }
     const targetId = conv.buyerId === userId ? conv.sellerId : conv.buyerId;
-    const [mine, theirs, review] = await Promise.all([
+    const [mine, theirs, first, review, need] = await Promise.all([
       this.prisma.message.count({ where: { conversationId, senderId: userId } }),
       this.prisma.message.count({ where: { conversationId, senderId: targetId } }),
+      this.prisma.message.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true }
+      }),
       this.prisma.review.findUnique({
         where: { conversationId_authorId: { conversationId, authorId: userId } }
-      })
+      }),
+      this.requirements()
     ]);
-    const bothWrote = mine > 0 && theirs > 0;
+    const readyAt = first ? new Date(first.createdAt.getTime() + need.hours * 3_600_000) : null;
+    const enoughMessages = mine >= need.messages && theirs >= need.messages;
+    const enoughTime = !!readyAt && readyAt.getTime() <= Date.now();
+    const reason = review ? 'already' : !enoughMessages ? 'no_dialog' : !enoughTime ? 'too_early' : null;
     return {
-      eligible: bothWrote && !review,
-      reason: review ? 'already' : bothWrote ? null : 'no_dialog',
+      eligible: reason === null,
+      reason,
       review,
+      need,
+      mine,
+      theirs,
+      readyAt,
       conv,
       targetId
+    };
+  }
+
+  // Порог для отзыва — из админки (Setting), по умолчанию 4 сообщения с каждой стороны и 1 час.
+  private async requirements() {
+    const s = await readNumberSettings(this.prisma, { 'reviews.min_messages': 4, 'reviews.min_hours': 1 });
+    return {
+      messages: Math.max(1, Math.round(s['reviews.min_messages'])),
+      hours: Math.max(0, s['reviews.min_hours'])
     };
   }
 
@@ -46,7 +77,11 @@ export class ReviewsService {
     await assertNotBlocked(this.prisma, userId);
     const e = await this.eligibility(userId, dto.conversationId);
     if (e.reason === 'already') throw new ConflictException('Вы уже оставили отзыв по этой переписке');
-    if (!e.eligible) throw new ForbiddenException('Отзыв можно оставить, когда вы оба написали в переписке');
+    if (!e.eligible) {
+      throw new ForbiddenException(
+        `Отзыв можно оставить, когда каждый из вас написал хотя бы ${messagesWord(e.need.messages)} и с начала переписки прошёл ${e.need.hours} ч`
+      );
+    }
 
     const text = dto.text?.trim() || null;
     const review = await this.prisma.review.create({
