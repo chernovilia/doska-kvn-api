@@ -365,9 +365,14 @@ export class AdsService implements OnApplicationBootstrap {
   async contact(adId: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
-      select: { phone: true, author: { select: { phone: true, contactMethod: true } } }
+      select: {
+        phone: true,
+        status: true,
+        author: { select: { phone: true, contactMethod: true, blockedAt: true } }
+      }
     });
-    if (!ad) throw new NotFoundException('Ad not found');
+    // Телефон — только у объявления, которое видно всем.
+    if (!ad || ad.status !== AdStatus.approved || ad.author.blockedAt) throw new NotFoundException('Ad not found');
     const phone = ad.author.contactMethod === 'phone' ? ad.phone || ad.author.phone : null;
     if (!phone) throw new NotFoundException('Продавец принимает только сообщения');
     return { phone };
@@ -479,6 +484,11 @@ export class AdsService implements OnApplicationBootstrap {
 
     const status = await this.initialAdStatus();
     const photoUrls = (dto.photoUrls || []).slice(0, 10);
+    // Только фото, загруженные через наш /uploads: чужие ссылки — это хотлинк и пиксели слежки.
+    const ownPrefix = `${this.s3.publicUrlBase}/ads/`;
+    if (photoUrls.some((u) => !u.startsWith(ownPrefix))) {
+      throw new BadRequestException('Фото можно добавить только загрузкой на сайт');
+    }
 
     const created = await this.prisma.ad.create({
       data: {
@@ -492,8 +502,6 @@ export class AdsService implements OnApplicationBootstrap {
         searchText: buildSearchText({ ...dto, attributes: sanitizeAttributes(dto.attributes) }),
         eventDate: dto.section === 'events' && dto.eventDate ? new Date(dto.eventDate) : undefined,
         address: dto.address?.trim() || city.name,
-        phone: dto.phone,
-        avitoUrl: dto.avitoUrl,
         categoryGroup: dto.categoryGroup,
         category: dto.category,
         cityId: city.id,
@@ -542,7 +550,7 @@ export class AdsService implements OnApplicationBootstrap {
   // 45 000 — с запасом под лимит протокола sitemap в 50 000 URL на файл.
   async sitemapEntries() {
     const items = await this.prisma.ad.findMany({
-      where: { status: AdStatus.approved },
+      where: { status: AdStatus.approved, author: { blockedAt: null } },
       select: { id: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
       take: 45_000

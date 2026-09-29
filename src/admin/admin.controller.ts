@@ -436,6 +436,13 @@ export class AdminController {
   // Только перечисленные ключи; значение проверяется по диапазону. Лента подхватывает
   // новые веса в течение минуты (кеш в AdsService).
 
+  // Диагностика: какой IP сервер видит у админа. Должен совпасть с настоящим
+  // адресом — иначе лимиты запросов считаются по адресу прокси, общему для всех.
+  @Get('whoami')
+  whoami(@Req() req: { ip?: string; headers: Record<string, unknown> }) {
+    return { ip: req.ip ?? null, forwardedFor: req.headers['x-forwarded-for'] ?? null };
+  }
+
   @Get('settings')
   async getSettings() {
     const rows = await this.prisma.setting.findMany({

@@ -30,9 +30,9 @@ export class AppThrottlerGuard extends ThrottlerGuard {
         // Просроченный или поддельный токен — считаем как гостя.
       }
     }
-    // За Cloudflare → Amvera ingress req.ip указывает на узел Cloudflare, а не на клиента.
-    const cfIp = req.headers?.['cf-connecting-ip'];
-    const ip = (Array.isArray(cfIp) ? cfIp[0] : cfIp) || req.ip;
-    return `ip:${ip}`;
+    // Только req.ip (trust proxy 1 → адрес, который записал ингресс Amvera).
+    // CF-Connecting-IP не читаем: прокси Cloudflare выключен, и заголовок может
+    // прислать кто угодно — подставляя случайный «IP», обходили бы лимиты.
+    return `ip:${req.ip}`;
   }
 }

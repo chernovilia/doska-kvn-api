@@ -72,13 +72,7 @@ export class CreateAdDto {
   @IsISO8601()
   eventDate?: string;
 
-  @IsOptional()
-  @IsString()
-  phone?: string;
 
-  @IsOptional()
-  @IsString()
-  avitoUrl?: string;
 
   // URLs фото, уже загруженных через POST /uploads/ad-photo.
   // Порядок в массиве = порядок отображения в галерее (первое — обложка).

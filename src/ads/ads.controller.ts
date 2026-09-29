@@ -53,7 +53,7 @@ export class AdsController {
     @Param('id') id: string,
     @Body() dto: ViewAdDto
   ) {
-    const ip = (req.headers['cf-connecting-ip'] as string) || req.ip || '';
+    const ip = req.ip || ''; // не CF-Connecting-IP: без прокси Cloudflare его подделывает клиент
     // Гость без localStorage (приватный режим) — по хэшу IP, сам IP не храним.
     const sessionId =
       dto.sessionId || 'ip-' + createHash('sha256').update(ip).digest('hex').slice(0, 24);
