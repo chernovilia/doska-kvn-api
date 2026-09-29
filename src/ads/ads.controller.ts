@@ -92,6 +92,18 @@ export class AdsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/archive')
+  archive(@CurrentUser() userId: string, @Param('id') id: string) {
+    return this.ads.archiveOwn(userId, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/renew')
+  renew(@CurrentUser() userId: string, @Param('id') id: string) {
+    return this.ads.renewOwn(userId, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@CurrentUser() userId: string, @Param('id') id: string) {
     return this.ads.removeOwn(userId, id);

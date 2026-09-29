@@ -288,6 +288,10 @@ export class SeedService implements OnModuleInit {
       ['moderation.llm.provider', 'gigachat', 'Провайдер LLM'],
 
       // Отзывы
+      ['ads.lifetime_days', '60', 'Срок показа объявления, дней (потом — архив)'],
+      ['ads.archive_keep_days', '90', 'Сколько дней хранить архив до удаления'],
+      ['ads.rejected_keep_days', '30', 'Сколько дней хранить отклонённые до удаления'],
+      ['ads.lifecycle_warn_days', '3', 'За сколько дней предупреждать об архиве и удалении'],
       ['reviews.min_messages', '4', 'Сообщений от каждой стороны, чтобы оставить отзыв'],
       ['reviews.min_hours', '1', 'Часов с первого сообщения, чтобы оставить отзыв'],
 

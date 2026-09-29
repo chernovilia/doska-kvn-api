@@ -24,6 +24,26 @@ const MANAGED_SETTINGS: Record<
     hint: 'Выключено — новые объявления ждут одобрения в админке',
     type: 'bool', default: 'true', min: 0, max: 1
   },
+  'ads.lifetime_days': {
+    label: 'Срок показа объявления, дней',
+    hint: 'Потом — в архив; автор может продлить',
+    type: 'number', default: '60', min: 7, max: 365, step: 1
+  },
+  'ads.archive_keep_days': {
+    label: 'Хранить архив, дней',
+    hint: 'Потом объявление удаляется вместе с фото',
+    type: 'number', default: '90', min: 7, max: 365, step: 1
+  },
+  'ads.rejected_keep_days': {
+    label: 'Хранить отклонённые, дней',
+    hint: 'Потом удаляются вместе с фото',
+    type: 'number', default: '30', min: 3, max: 365, step: 1
+  },
+  'ads.lifecycle_warn_days': {
+    label: 'Предупреждать за, дней',
+    hint: 'Письмо автору перед архивом и перед удалением',
+    type: 'number', default: '3', min: 0, max: 14, step: 1
+  },
   'reviews.min_messages': {
     label: 'Отзыв: сообщений от каждого',
     hint: 'Сколько сообщений должен написать каждый в переписке, чтобы оценить друг друга',
@@ -70,6 +90,7 @@ import { AdminGuard } from './admin.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { SupportService } from '../support/support.service';
+import { DAY_MS, lifecycleSettings, purgeAd } from '../ads/lifecycle';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -126,7 +147,7 @@ export class AdminController {
     const week = new Date(Date.now() - 7 * day);
     const [
       users, usersNew7d, usersOnboarded, blockedUsers,
-      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, adsNew7d,
+      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, archivedAds, adsNew7d,
       conversations, messages7d, reviews, favorites, views, pendingReports, openTickets,
       byCity, daily,
       adPhotos, refreshTokens, emailCodes
@@ -140,6 +161,7 @@ export class AdminController {
       this.prisma.ad.count({ where: { status: 'pending' } }),
       this.prisma.ad.count({ where: { status: 'rejected' } }),
       this.prisma.ad.count({ where: { status: 'hidden' } }),
+      this.prisma.ad.count({ where: { status: 'archived' } }),
       this.prisma.ad.count({ where: { createdAt: { gte: week } } }),
       this.prisma.conversation.count(),
       this.prisma.message.count({ where: { createdAt: { gte: week } } }),
@@ -166,7 +188,7 @@ export class AdminController {
     ]);
     return {
       users, usersNew7d, usersOnboarded, blockedUsers,
-      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, adsNew7d,
+      ads, approvedAds, pendingAds, rejectedAds, hiddenAds, archivedAds, adsNew7d,
       conversations, messages7d, reviews, favorites,
       views: views._sum.viewsCount ?? 0,
       pendingReports,
@@ -282,7 +304,7 @@ export class AdminController {
   ) {
     const take = Math.min(500, Math.max(1, Number(limit) || 100));
     const skip = Math.max(0, Number(offset) || 0);
-    const allowedStatuses = ['pending', 'approved', 'rejected', 'hidden'];
+    const allowedStatuses = ['pending', 'approved', 'rejected', 'hidden', 'archived'];
     const query = q?.trim();
     const where: Prisma.AdWhereInput = {
       ...(status && allowedStatuses.includes(status) ? { status: status as any } : {}),
@@ -365,13 +387,22 @@ export class AdminController {
       select: { status: true, authorId: true, title: true, publishedAt: true }
     });
     if (!before) throw new BadRequestException('Ad not found');
+    const { lifetimeDays } = await lifecycleSettings(this.prisma);
+    const now = Date.now();
     const ad = await this.prisma.ad.update({
       where: { id },
       data: {
         status: body.status as any,
         moderationNotes: note || null,
         // Дата первой публикации: возврат скрытого не поднимает его как новое.
-        publishedAt: body.status === 'approved' && !before.publishedAt ? new Date() : undefined
+        publishedAt: body.status === 'approved' && !before.publishedAt ? new Date() : undefined,
+        // Сроки: опубликованное живёт lifetimeDays с момента (повторной) публикации,
+        // отклонённое ждёт удаления с момента отклонения.
+        ...(body.status === 'approved'
+          ? { expiresAt: new Date(now + lifetimeDays * DAY_MS), archivedAt: null, rejectedAt: null }
+          : {}),
+        ...(body.status === 'rejected' ? { rejectedAt: new Date(now) } : {}),
+        lifecycleWarnedAt: before.status !== body.status ? null : undefined
       },
       select: { id: true, status: true, moderationNotes: true }
     });
@@ -416,29 +447,16 @@ export class AdminController {
       where: { id },
       select: { authorId: true, title: true }
     });
-    const photos = await this.prisma.adPhoto.findMany({
-      where: { adId: id },
-      select: { url: true }
+    if (!target) throw new BadRequestException('Ad not found');
+    await purgeAd(this.prisma, this.s3, id);
+    const why = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
+    await this.notifications.notify(target.authorId, {
+      type: 'ad_removed',
+      title: `Объявление удалено модератором: «${target.title}»`,
+      body: why ? `Причина: ${why}` : 'Оно нарушало правила площадки.',
+      link: '/terms',
+      cta: 'Правила площадки'
     });
-    await this.prisma.$transaction([
-      this.prisma.adPhoto.deleteMany({ where: { adId: id } }),
-      this.prisma.adView.deleteMany({ where: { adId: id } }),
-      this.prisma.adPromo.deleteMany({ where: { adId: id } }),
-      this.prisma.favorite.deleteMany({ where: { adId: id } }),
-      this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: id } }),
-      this.prisma.ad.delete({ where: { id } })
-    ]);
-    void this.s3.deleteByUrls(photos.map((p) => p.url));
-    if (target) {
-      const why = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
-      await this.notifications.notify(target.authorId, {
-        type: 'ad_removed',
-        title: `Объявление удалено модератором: «${target.title}»`,
-        body: why ? `Причина: ${why}` : 'Оно нарушало правила площадки.',
-        link: '/terms',
-        cta: 'Правила площадки'
-      });
-    }
     return { ok: true };
   }
 

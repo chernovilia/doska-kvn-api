@@ -206,6 +206,7 @@ enum AdStatus {
   rejected
   hidden
   expired
+  archived  // в архиве: вышел срок или автор снял («продано»); автор может вернуть
 }
 
 enum ModerationLevel {
@@ -258,7 +259,10 @@ model Ad {
 
   createdAt       DateTime        @default(now())
   publishedAt     DateTime?
-  expiresAt       DateTime?
+  expiresAt       DateTime?                               // когда уйдёт в архив (срок жизни)
+  archivedAt      DateTime?                               // ушло в архив — удалим через ads.archive_keep_days
+  rejectedAt      DateTime?                               // отклонено — удалим через ads.rejected_keep_days
+  lifecycleWarnedAt DateTime?                             // предупреждение об архиве / удалении отправлено
 
   // Аналитика — счётчики для быстрой сортировки
   viewsCount          Int @default(0)

@@ -4,6 +4,7 @@ import { adminUserIds, isAdminUser } from '../auth/admin-check';
 import { NotificationsService } from '../notifications/notifications.service';
 import { buildSearchText, normalizeSearch } from './search-text';
 import { publicAd } from './public-ad';
+import { DAY_MS, lifecycleInfo, lifecycleSettings, purgeAd } from './lifecycle';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
@@ -381,22 +382,49 @@ export class AdsService implements OnApplicationBootstrap {
 
   // Юзер удаляет своё объявление. Проверяем что автор совпадает — иначе 403.
   async removeOwn(userId: string, adId: string) {
-    const ad = await this.prisma.ad.findUnique({
-      where: { id: adId },
-      select: { authorId: true, photos: { select: { url: true } } }
-    });
+    const ad = await this.prisma.ad.findUnique({ where: { id: adId }, select: { authorId: true } });
     if (!ad) throw new BadRequestException('Ad not found');
     if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
-    await this.prisma.$transaction([
-      this.prisma.adPhoto.deleteMany({ where: { adId } }),
-      this.prisma.adView.deleteMany({ where: { adId } }),
-      this.prisma.adPromo.deleteMany({ where: { adId } }),
-      this.prisma.favorite.deleteMany({ where: { adId } }),
-      this.prisma.report.deleteMany({ where: { targetKind: 'ad', targetId: adId } }),
-      this.prisma.ad.delete({ where: { id: adId } })
-    ]);
-    void this.s3.deleteByUrls(ad.photos.map((p) => p.url));
+    await purgeAd(this.prisma, this.s3, adId);
     return { ok: true };
+  }
+
+  // «Продано / неактуально»: автор сам убирает опубликованное в архив, вернуть можно в любой момент.
+  async archiveOwn(userId: string, adId: string) {
+    const ad = await this.prisma.ad.findUnique({ where: { id: adId }, select: { authorId: true, status: true } });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    if (ad.status !== AdStatus.approved) {
+      throw new BadRequestException('В архив можно убрать только опубликованное объявление');
+    }
+    const updated = await this.prisma.ad.update({
+      where: { id: adId },
+      data: { status: AdStatus.archived, archivedAt: new Date(), lifecycleWarnedAt: null }
+    });
+    const cfg = await lifecycleSettings(this.prisma);
+    return { status: updated.status, archivedAt: updated.archivedAt, ...lifecycleInfo(updated, cfg) };
+  }
+
+  // Продлить: опубликованное — ещё на срок жизни, из архива — снова в ленту на срок жизни.
+  // Скрытые модератором и отклонённые так не вернуть.
+  async renewOwn(userId: string, adId: string) {
+    const ad = await this.prisma.ad.findUnique({ where: { id: adId }, select: { authorId: true, status: true } });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    if (ad.status !== AdStatus.approved && ad.status !== AdStatus.archived) {
+      throw new BadRequestException('Продлить можно опубликованное объявление или объявление из архива');
+    }
+    const cfg = await lifecycleSettings(this.prisma);
+    const updated = await this.prisma.ad.update({
+      where: { id: adId },
+      data: {
+        status: AdStatus.approved,
+        expiresAt: new Date(Date.now() + cfg.lifetimeDays * DAY_MS),
+        archivedAt: null,
+        lifecycleWarnedAt: null
+      }
+    });
+    return { status: updated.status, expiresAt: updated.expiresAt, ...lifecycleInfo(updated, cfg) };
   }
 
   // Все объявления автора — включая pending/rejected/archived.
@@ -409,9 +437,9 @@ export class AdsService implements OnApplicationBootstrap {
         photos: { orderBy: { order: 'asc' } }
       }
     });
-    const w = await this.getWeights();
+    const [w, cfg] = await Promise.all([this.getWeights(), lifecycleSettings(this.prisma)]);
     return {
-      items: items.map((a) => publicAd({ ...a, nextBumpAt: this.nextBumpAt(a, w) })),
+      items: items.map((a) => publicAd({ ...a, nextBumpAt: this.nextBumpAt(a, w), ...lifecycleInfo(a, cfg) })),
       total: items.length
     };
   }
@@ -454,11 +482,13 @@ export class AdsService implements OnApplicationBootstrap {
     if (ad.status !== AdStatus.approved && !privileged) throw new NotFoundException('Ad not found');
     const { blockedAt: _blocked, ...author } = ad.author;
     const w = await this.getWeights();
+    const lifecycle = privileged ? lifecycleInfo(ad, await lifecycleSettings(this.prisma)) : {};
     return publicAd({
       ...ad,
       moderationNotes: privileged ? ad.moderationNotes : null,
       author,
-      nextBumpAt: this.nextBumpAt(ad, w)
+      nextBumpAt: this.nextBumpAt(ad, w),
+      ...lifecycle
     });
   }
 
@@ -484,6 +514,7 @@ export class AdsService implements OnApplicationBootstrap {
     if (!author) throw new BadRequestException('Unknown author');
 
     const status = await this.initialAdStatus();
+    const { lifetimeDays } = await lifecycleSettings(this.prisma);
     const photoUrls = (dto.photoUrls || []).slice(0, 10);
     // Только фото, загруженные через наш /uploads: чужие ссылки — это хотлинк и пиксели слежки.
     const ownPrefix = `${this.s3.publicUrlBase}/ads/`;
@@ -520,6 +551,7 @@ export class AdsService implements OnApplicationBootstrap {
         // Определяется через Setting['moderation.autoApprove'] (админка) или env.
         status,
         publishedAt: status === AdStatus.approved ? new Date() : null,
+        expiresAt: status === AdStatus.approved ? new Date(Date.now() + lifetimeDays * DAY_MS) : null,
         photos: photoUrls.length
           ? {
               create: photoUrls.map((url, idx) => ({

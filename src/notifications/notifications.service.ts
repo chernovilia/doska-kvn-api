@@ -10,6 +10,9 @@ export type NotificationType =
   | 'ad_hidden'
   | 'ad_removed'
   | 'ad_pending'
+  | 'ad_expiring'
+  | 'ad_archived'
+  | 'ad_deleting'
   | 'review_new'
   | 'support_new'
   | 'support_reply';
