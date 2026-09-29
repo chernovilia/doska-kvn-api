@@ -505,39 +505,66 @@ export class AdsService implements OnApplicationBootstrap {
     return AdStatus.approved;
   }
 
-  async create(userId: string, dto: CreateAdDto) {
-    await assertNotBlocked(this.prisma, userId);
+  // Поля объявления из формы подачи — общие для создания и правки.
+  private async adFields(dto: CreateAdDto) {
     const city = await this.prisma.city.findUnique({ where: { id: dto.cityId } });
     if (!city) throw new BadRequestException('Unknown city');
-
-    const author = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!author) throw new BadRequestException('Unknown author');
-
-    const status = await this.initialAdStatus();
-    const { lifetimeDays } = await lifecycleSettings(this.prisma);
     const photoUrls = (dto.photoUrls || []).slice(0, 10);
     // Только фото, загруженные через наш /uploads: чужие ссылки — это хотлинк и пиксели слежки.
     const ownPrefix = `${this.s3.publicUrlBase}/ads/`;
     if (photoUrls.some((u) => !u.startsWith(ownPrefix))) {
       throw new BadRequestException('Фото можно добавить только загрузкой на сайт');
     }
-
-    const created = await this.prisma.ad.create({
+    const attributes = sanitizeAttributes(dto.attributes);
+    return {
+      photoUrls,
       data: {
         section: dto.section,
         title: dto.title,
         price: dto.price ?? 0,
-        priceTo: dto.priceTo,
-        priceSuffix: dto.priceSuffix,
-        description: dto.description,
-        attributes: sanitizeAttributes(dto.attributes),
-        searchText: buildSearchText({ ...dto, attributes: sanitizeAttributes(dto.attributes) }),
-        eventDate: dto.section === 'events' && dto.eventDate ? new Date(dto.eventDate) : undefined,
+        priceTo: dto.priceTo ?? null,
+        priceSuffix: dto.priceSuffix ?? null,
+        description: dto.description ?? null,
+        attributes: attributes ?? Prisma.DbNull,
+        searchText: buildSearchText({ ...dto, attributes }),
+        eventDate: dto.section === 'events' && dto.eventDate ? new Date(dto.eventDate) : null,
         address: dto.address?.trim() || city.name,
-        categoryGroup: dto.categoryGroup,
-        category: dto.category,
+        categoryGroup: dto.categoryGroup ?? null,
+        category: dto.category ?? null,
         cityId: city.id,
-        regionId: city.regionId,
+        regionId: city.regionId
+      }
+    };
+  }
+
+  // Автопубликация выключена — зовём админов в очередь модерации.
+  private async notifyAdminsPending(ad: { id: string; title: string }, author: { id: string; name: string | null }, edited: boolean) {
+    for (const adminId of await adminUserIds(this.prisma)) {
+      if (adminId === author.id) continue;
+      await this.notifications.notify(adminId, {
+        type: 'ad_pending',
+        title: edited ? `Изменено, на модерации: «${ad.title}»` : `На модерации: «${ad.title}»`,
+        body: edited
+          ? `${author.name || 'Пользователь'} изменил объявление — проверьте правки.`
+          : `${author.name || 'Пользователь'} подал объявление — оно ждёт проверки.`,
+        link: '/admin?tab=ads&status=pending',
+        cta: 'Проверить'
+      });
+    }
+  }
+
+  async create(userId: string, dto: CreateAdDto) {
+    await assertNotBlocked(this.prisma, userId);
+    const author = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!author) throw new BadRequestException('Unknown author');
+    const { data, photoUrls } = await this.adFields(dto);
+
+    const status = await this.initialAdStatus();
+    const { lifetimeDays } = await lifecycleSettings(this.prisma);
+
+    const created = await this.prisma.ad.create({
+      data: {
+        ...data,
         authorId: author.id,
         // Снапшот на момент публикации
         authorType: author.type,
@@ -553,31 +580,66 @@ export class AdsService implements OnApplicationBootstrap {
         publishedAt: status === AdStatus.approved ? new Date() : null,
         expiresAt: status === AdStatus.approved ? new Date(Date.now() + lifetimeDays * DAY_MS) : null,
         photos: photoUrls.length
-          ? {
-              create: photoUrls.map((url, idx) => ({
-                url,
-                order: idx
-              }))
-            }
+          ? { create: photoUrls.map((url, idx) => ({ url, order: idx })) }
           : undefined
       },
       include: { photos: { orderBy: { order: 'asc' } } }
     });
 
-    // Автопубликация выключена — зовём админов в очередь модерации.
-    if (created.status === AdStatus.pending) {
-      for (const adminId of await adminUserIds(this.prisma)) {
-        if (adminId === userId) continue;
-        await this.notifications.notify(adminId, {
-          type: 'ad_pending',
-          title: `На модерации: «${created.title}»`,
-          body: `${author.name || 'Пользователь'} подал объявление — оно ждёт проверки.`,
-          link: '/admin?tab=ads&status=pending',
-          cta: 'Проверить'
-        });
-      }
-    }
+    if (created.status === AdStatus.pending) await this.notifyAdminsPending(created, author, false);
     return created;
+  }
+
+  /**
+   * Правка своего объявления. Модерация — как при подаче: при автопубликации изменения сразу
+   * в ленте, иначе объявление уходит на проверку. Отклонённое или скрытое модератором после
+   * правки всегда идёт на проверку — правкой нельзя обойти решение модератора.
+   * Дата публикации не меняется: правка не поднимает объявление в ленте.
+   */
+  async update(userId: string, adId: string, dto: CreateAdDto) {
+    await assertNotBlocked(this.prisma, userId);
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { authorId: true, status: true, publishedAt: true, expiresAt: true, photos: { select: { url: true } } }
+    });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    const author = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } });
+    const { data, photoUrls } = await this.adFields(dto);
+
+    const underModeration = ad.status === AdStatus.rejected || ad.status === AdStatus.hidden;
+    const status = underModeration ? AdStatus.pending : await this.initialAdStatus();
+    const now = new Date();
+    const { lifetimeDays } = await lifecycleSettings(this.prisma);
+    const approved = status === AdStatus.approved;
+    // Срок показа сохраняем, если объявление и так было в ленте; из архива — новый срок.
+    const keepExpiry = ad.status === AdStatus.approved && ad.expiresAt && ad.expiresAt > now;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.adPhoto.deleteMany({ where: { adId } });
+      return tx.ad.update({
+        where: { id: adId },
+        data: {
+          ...data,
+          status,
+          moderationNotes: null,
+          publishedAt: approved ? (ad.publishedAt ?? now) : ad.publishedAt,
+          expiresAt: approved ? (keepExpiry ? ad.expiresAt : new Date(now.getTime() + lifetimeDays * DAY_MS)) : ad.expiresAt,
+          archivedAt: null,
+          rejectedAt: null,
+          lifecycleWarnedAt: null,
+          photos: photoUrls.length ? { create: photoUrls.map((url, idx) => ({ url, order: idx })) } : undefined
+        },
+        include: { photos: { orderBy: { order: 'asc' } } }
+      });
+    });
+
+    // Фото, которые убрали при правке, удаляем из хранилища.
+    const removed = ad.photos.map((p) => p.url).filter((u) => !photoUrls.includes(u));
+    if (removed.length) void this.s3.deleteByUrls(removed);
+
+    if (updated.status === AdStatus.pending && author) await this.notifyAdminsPending(updated, author, true);
+    return publicAd(updated);
   }
 
   // 45 000 — с запасом под лимит протокола sitemap в 50 000 URL на файл.

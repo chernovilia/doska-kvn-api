@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
   Req,
   UseGuards
@@ -89,6 +90,14 @@ export class AdsController {
   @Post(':id/bump')
   bump(@CurrentUser() userId: string, @Param('id') id: string) {
     return this.ads.bump(userId, id);
+  }
+
+  // Правка своего объявления — те же поля, что при подаче; модерация как при подаче.
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ medium: { limit: 30, ttl: 60 * 60_000 } })
+  @Put(':id')
+  update(@CurrentUser() userId: string, @Param('id') id: string, @Body() dto: CreateAdDto) {
+    return this.ads.update(userId, id, dto);
   }
 
   @UseGuards(JwtAuthGuard)
