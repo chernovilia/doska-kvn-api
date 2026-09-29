@@ -3,6 +3,7 @@ import { assertNotBlocked } from '../auth/blocked';
 import { adminUserIds, isAdminUser } from '../auth/admin-check';
 import { NotificationsService } from '../notifications/notifications.service';
 import { buildSearchText, normalizeSearch } from './search-text';
+import { publicAd } from './public-ad';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
@@ -329,7 +330,7 @@ export class AdsService implements OnApplicationBootstrap {
         }),
         this.prisma.ad.count({ where })
       ]);
-      return { items, total };
+      return { items: items.map(publicAd), total };
     }
 
     // Тянем чуть с запасом: score-сортировка + правила потом обрежут.
@@ -357,7 +358,7 @@ export class AdsService implements OnApplicationBootstrap {
     }
 
     const items = sorted.slice(q.offset ?? 0, (q.offset ?? 0) + (q.limit ?? 100));
-    return { items, total };
+    return { items: items.map(publicAd), total };
   }
 
   // Телефон — только по отдельному запросу авторизованного юзера, чтобы его нельзя было
@@ -410,7 +411,7 @@ export class AdsService implements OnApplicationBootstrap {
     });
     const w = await this.getWeights();
     return {
-      items: items.map((a) => ({ ...a, nextBumpAt: this.nextBumpAt(a, w) })),
+      items: items.map((a) => publicAd({ ...a, nextBumpAt: this.nextBumpAt(a, w) })),
       total: items.length
     };
   }
@@ -453,12 +454,12 @@ export class AdsService implements OnApplicationBootstrap {
     if (ad.status !== AdStatus.approved && !privileged) throw new NotFoundException('Ad not found');
     const { blockedAt: _blocked, ...author } = ad.author;
     const w = await this.getWeights();
-    return {
+    return publicAd({
       ...ad,
       moderationNotes: privileged ? ad.moderationNotes : null,
       author,
       nextBumpAt: this.nextBumpAt(ad, w)
-    };
+    });
   }
 
   // Определяет initialStatus нового объявления:

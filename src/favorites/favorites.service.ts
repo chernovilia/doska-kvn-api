@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AdStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { publicAd } from '../ads/public-ad';
 
 // Автор в карточке — те же поля, что в ленте.
 const AD_INCLUDE = {
@@ -33,7 +34,7 @@ export class FavoritesService {
       take: 200,
       include: { ad: { include: AD_INCLUDE } }
     });
-    return { items: rows.map((r) => r.ad) };
+    return { items: rows.map((r) => publicAd(r.ad)) };
   }
 
   async add(userId: string, adId: string) {

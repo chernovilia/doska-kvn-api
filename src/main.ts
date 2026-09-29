@@ -3,6 +3,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser = require('cookie-parser');
 import helmet from 'helmet';
+import compression = require('compression');
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -16,6 +17,8 @@ async function bootstrap() {
 
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cookieParser());
+  // gzip/brotli-клиентам: лента из 100 объявлений ~176 КБ → ~40 КБ
+  app.use(compression());
 
   const origins = (process.env.CORS_ORIGINS || '')
     .split(',')
