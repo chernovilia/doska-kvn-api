@@ -39,7 +39,7 @@ export function renderAuthCodeEmail(params: {
   <div style="max-width:520px;margin:0 auto;padding:32px 20px;">
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${brandUrl}" style="text-decoration:none;color:#0f172a;font-weight:900;font-size:24px;letter-spacing:-0.5px;">
-        Доска<span style="color:#f97316;">/</span>КВН
+        Доска<span style="color:#ee8b45;">/</span>КВН
       </a>
     </div>
 
@@ -47,7 +47,7 @@ export function renderAuthCodeEmail(params: {
       <div style="font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:8px;">
         Код для входа
       </div>
-      <div style="font-size:40px;font-weight:900;letter-spacing:8px;color:#ea580c;margin:16px 0;font-variant-numeric:tabular-nums;">
+      <div style="font-size:40px;font-weight:900;letter-spacing:8px;color:#dc7530;margin:16px 0;font-variant-numeric:tabular-nums;">
         ${code}
       </div>
       <div style="font-size:13px;color:#64748b;">
@@ -62,7 +62,7 @@ export function renderAuthCodeEmail(params: {
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Городская платформа объявлений, услуг и афиши<br>
       агломерации Кулебаки • Выкса • Навашино<br>
-      <a href="${brandUrl}" style="color:#c2410c;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
     </div>
   </div>
 </body>
@@ -117,7 +117,7 @@ export function renderNewMessageEmail(params: {
   <div style="max-width:520px;margin:0 auto;padding:32px 20px;">
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${brandUrl}" style="text-decoration:none;color:#0f172a;font-weight:900;font-size:24px;letter-spacing:-0.5px;">
-        Доска<span style="color:#f97316;">/</span>КВН
+        Доска<span style="color:#ee8b45;">/</span>КВН
       </a>
     </div>
 
@@ -130,7 +130,7 @@ export function renderNewMessageEmail(params: {
       </div>
       <div style="font-size:15px;line-height:1.6;background:#f1f5f9;border-radius:12px;padding:12px 14px;white-space:pre-wrap;">${escapeHtml(preview)}</div>
       <div style="text-align:center;margin-top:20px;">
-        <a href="${url}" style="display:inline-block;background:#f97316;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px;">
+        <a href="${url}" style="display:inline-block;background:#ffffff;border:1.5px solid #f4a466;color:#b35b22;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px;">
           Ответить
         </a>
       </div>
@@ -138,7 +138,7 @@ export function renderNewMessageEmail(params: {
 
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Уведомления можно отключить в настройках профиля.<br>
-      <a href="${brandUrl}" style="color:#c2410c;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
     </div>
   </div>
 </body>
@@ -181,7 +181,7 @@ export function renderNotificationEmail(params: {
   <div style="max-width:520px;margin:0 auto;padding:32px 20px;">
     <div style="text-align:center;margin-bottom:24px;">
       <a href="${brandUrl}" style="text-decoration:none;color:#0f172a;font-weight:900;font-size:24px;letter-spacing:-0.5px;">
-        Доска<span style="color:#f97316;">/</span>КВН
+        Доска<span style="color:#ee8b45;">/</span>КВН
       </a>
     </div>
 
@@ -189,7 +189,7 @@ export function renderNotificationEmail(params: {
       <div style="font-size:18px;font-weight:800;line-height:1.35;margin-bottom:${body ? '10px' : '0'};">${escapeHtml(params.title)}</div>
       ${body ? `<div style="font-size:15px;line-height:1.6;color:#334155;white-space:pre-wrap;">${escapeHtml(body)}</div>` : ''}
       <div style="text-align:center;margin-top:20px;">
-        <a href="${url}" style="display:inline-block;background:#f97316;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px;">
+        <a href="${url}" style="display:inline-block;background:#ffffff;border:1.5px solid #f4a466;color:#b35b22;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px;">
           ${escapeHtml(cta)}
         </a>
       </div>
@@ -197,7 +197,7 @@ export function renderNotificationEmail(params: {
 
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Уведомления на почту можно отключить в настройках профиля.<br>
-      <a href="${brandUrl}" style="color:#c2410c;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
     </div>
   </div>
 </body>
