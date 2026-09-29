@@ -440,7 +440,11 @@ export class AdminController {
   // адресом — иначе лимиты запросов считаются по адресу прокси, общему для всех.
   @Get('whoami')
   whoami(@Req() req: { ip?: string; headers: Record<string, unknown> }) {
-    return { ip: req.ip ?? null, forwardedFor: req.headers['x-forwarded-for'] ?? null };
+    return {
+      ip: req.ip ?? null,
+      forwardedFor: req.headers['x-forwarded-for'] ?? null,
+      realIp: req.headers['x-real-ip'] ?? null
+    };
   }
 
   @Get('settings')

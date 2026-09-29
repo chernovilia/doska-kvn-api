@@ -12,8 +12,11 @@ async function bootstrap() {
   });
   const logger = new Logger('bootstrap');
 
-  // За Amvera/Cloudflare — важно, чтобы req.ip был реальным клиентским
-  app.set('trust proxy', 1);
+  // req.ip — настоящий адрес клиента. Перед приложением на Amvera два внутренних прокси
+  // (10.x): с 'trust proxy', 1 сервер видел 10.128.0.97 у всех, и гости делили один лимит.
+  // Доверяем всем внутренним адресам — Express берёт первый внешний справа в X-Forwarded-For.
+  // Подделать нельзя: адрес, который дописал прокси Amvera, стоит правее присланного клиентом.
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cookieParser());
