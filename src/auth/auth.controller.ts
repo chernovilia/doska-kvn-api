@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import {
   Body,
   Controller,
@@ -62,7 +63,14 @@ function clearAuthCookies(res: Response) {
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // С одного адреса — не больше 5 кодов в минуту, 20 в час, 50 в сутки: иначе можно
+  // рассылать коды на чужие почты и портить репутацию отправителя в Unisender.
   @Post('email/request')
+  @Throttle({
+    short: { limit: 5, ttl: 60_000 },
+    medium: { limit: 20, ttl: 60 * 60_000 },
+    long: { limit: 50, ttl: 24 * 60 * 60_000 }
+  })
   @HttpCode(200)
   async requestEmailCode(
     @Body() dto: RequestCodeDto,
@@ -76,6 +84,7 @@ export class AuthController {
   }
 
   @Post('email/verify')
+  @Throttle({ short: { limit: 20, ttl: 60_000 } })
   @HttpCode(200)
   async verifyEmailCode(
     @Body() dto: VerifyCodeDto,
