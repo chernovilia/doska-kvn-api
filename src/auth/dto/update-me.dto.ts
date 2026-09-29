@@ -12,6 +12,12 @@ import {
 // Все поля опциональные: одним запросом можно как онбординг завершить,
 // так и точечно поменять один флажок.
 export class UpdateMeDto {
+  // «preset:cat» или своё фото из хранилища (см. auth/avatars.ts); null — убрать аватар.
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  avatar?: string | null;
+
   @IsOptional()
   @IsString()
   @MinLength(1)

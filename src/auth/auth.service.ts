@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException
 } from '@nestjs/common';
+import { isAllowedAvatar } from './avatars';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -318,6 +319,7 @@ export class AuthService {
       phone?: string;
       contactMethod?: 'phone' | 'chat';
       notifyEmail?: boolean;
+      avatar?: string | null;
       markOnboarded?: boolean;
       agreeTerms?: boolean;
     }
@@ -342,6 +344,10 @@ export class AuthService {
     }
     if (dto.contactMethod !== undefined) data.contactMethod = dto.contactMethod;
     if (dto.notifyEmail !== undefined) data.notifyEmail = dto.notifyEmail;
+    if (dto.avatar !== undefined) {
+      if (dto.avatar && !isAllowedAvatar(dto.avatar)) throw new BadRequestException('Недопустимый аватар');
+      data.avatar = dto.avatar || null;
+    }
     if (dto.markOnboarded === true) data.onboardedAt = new Date();
     if (dto.agreeTerms === true) data.agreedTermsAt = new Date();
 

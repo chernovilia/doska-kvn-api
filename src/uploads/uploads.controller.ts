@@ -41,6 +41,44 @@ export class UploadsController {
 
   // Rate-limit загрузки фото: 30 в час, 100 в сутки — с запасом на 6-фотных
   // объявлений (~5 объявлений в час = 30 фото).
+  // Аватар: квадрат 256×256 WebP в avatars/. Сохраняется в профиль отдельным PATCH /me.
+  @Post('avatar')
+  @Throttle({
+    medium: { limit: 20, ttl: 60 * 60_000 },
+    long: { limit: 50, ttl: 24 * 60 * 60_000 }
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_INPUT_MB * 1024 * 1024 }
+    })
+  )
+  async uploadAvatar(
+    @CurrentUser() userId: string,
+    @UploadedFile() file?: Express.Multer.File
+  ) {
+    if (!this.s3.configured) throw new BadRequestException('S3 не настроен на сервере');
+    if (!file) throw new BadRequestException('Файл не передан (поле file)');
+    if (!ALLOWED_MIME.includes(file.mimetype)) {
+      throw new BadRequestException(`Поддерживаемые форматы: JPEG, PNG, WebP, HEIC. Получен: ${file.mimetype}`);
+    }
+    let processed: Buffer;
+    try {
+      processed = await sharp(file.buffer)
+        .rotate()
+        .resize({ width: 256, height: 256, fit: 'cover', position: sharp.strategy.attention })
+        .webp({ quality: 80 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException('Не удалось обработать изображение');
+    }
+    const url = await this.s3.putObject({
+      key: `avatars/${crypto.randomUUID()}.webp`,
+      body: processed,
+      contentType: 'image/webp'
+    });
+    return { url, uploadedBy: userId };
+  }
+
   @Post('ad-photo')
   @Throttle({
     medium: { limit: 30, ttl: 60 * 60_000 },
