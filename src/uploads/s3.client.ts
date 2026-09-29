@@ -81,9 +81,11 @@ export class S3ClientService implements OnModuleInit {
   // которые S3-совместимые провайдеры принимают не всегда.
   async deleteByUrls(urls: string[]): Promise<void> {
     if (!this.configured) return;
+    // Вместе с фото — его миниатюра (…-t.webp, см. uploads.controller); нет её — S3 просто ответит ok.
     const keys = urls
       .map((u) => this.keyFromUrl(u))
-      .filter((k): k is string => !!k);
+      .filter((k): k is string => !!k)
+      .flatMap((k) => (k.endsWith('.webp') && !k.endsWith('-t.webp') ? [k, k.replace(/\.webp$/, '-t.webp')] : [k]));
     let failed = 0;
     for (let i = 0; i < keys.length; i += 10) {
       const results = await Promise.allSettled(

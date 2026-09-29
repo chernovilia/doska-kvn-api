@@ -70,13 +70,25 @@ export class UploadsController {
 
     // Сжимаем: max 1600px по большей стороне, WebP q80.
     // Автоповорот по EXIF, чтобы вертикальные фото с айфона не легли на бок.
+    // Плюс миниатюра 480×480 для карточек ленты: полное фото весит ~300 КБ,
+    // миниатюра ~30 КБ — лента на мобильном интернете грузится в разы быстрее.
+    // Имя миниатюры — то же с суффиксом -t, фронт выводит его из URL (lib/format → thumbUrl).
     let processed: Buffer;
+    let thumb: Buffer;
     try {
-      processed = await sharp(file.buffer)
-        .rotate()
-        .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 80 })
-        .toBuffer();
+      const base = sharp(file.buffer).rotate();
+      [processed, thumb] = await Promise.all([
+        base
+          .clone()
+          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toBuffer(),
+        base
+          .clone()
+          .resize({ width: 480, height: 480, fit: 'cover', position: sharp.strategy.attention })
+          .webp({ quality: 72 })
+          .toBuffer()
+      ]);
     } catch {
       throw new BadRequestException('Не удалось обработать изображение');
     }
@@ -86,11 +98,10 @@ export class UploadsController {
     const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
     const key = `ads/${yyyy}/${mm}/${crypto.randomUUID()}.webp`;
 
-    const url = await this.s3.putObject({
-      key,
-      body: processed,
-      contentType: 'image/webp'
-    });
+    const [url] = await Promise.all([
+      this.s3.putObject({ key, body: processed, contentType: 'image/webp' }),
+      this.s3.putObject({ key: key.replace(/\.webp$/, '-t.webp'), body: thumb, contentType: 'image/webp' })
+    ]);
 
     return {
       url,
