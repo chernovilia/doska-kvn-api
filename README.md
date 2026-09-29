@@ -36,7 +36,7 @@ API будет на `http://localhost:3000/v1`.
 
 | Метод | URL | |
 |---|---|---|
-| POST | `/auth/email/request` | Отправить 6-значный код на email |
+| POST | `/auth/email/request` | Отправить 6-значный код на email (с адреса 5/мин, 20/час, 50/сутки) |
 | POST | `/auth/email/verify` | Проверить код, выставить cookies |
 | POST | `/auth/refresh` | Ротация refresh-токена |
 | POST | `/auth/logout` | Отзыв refresh, очистка cookies |
@@ -89,6 +89,7 @@ API будет на `http://localhost:3000/v1`.
 | Метод | URL | |
 |---|---|---|
 | GET | `/admin/stats` | Счётчики таблиц |
+| GET | `/admin/whoami` | Какой IP сервер видит у админа — проверка, что лимиты считаются по настоящим адресам |
 | GET | `/admin/users?limit&offset&q&blocked=1` | Пользователи |
 | DELETE | `/admin/users/:id` | Удалить пользователя с его данными |
 | GET | `/admin/ads?limit&offset&status&q&authorId` | Объявления с фильтром статуса |
@@ -109,7 +110,7 @@ API будет на `http://localhost:3000/v1`.
 
 ## Rate-limit
 
-`AppThrottlerGuard` (ключ — `userId` из access-токена, для гостей `CF-Connecting-IP` или `req.ip` при `trust proxy 1`): глобально 300 запросов/мин, 5000/час, 50 000/сутки. Строгие лимиты — точечные, на эндпоинтах из таблиц выше. Счётчики в памяти процесса.
+`AppThrottlerGuard` (ключ — `userId` из access-токена, для гостей только `req.ip` при `trust proxy 1`; `CF-Connecting-IP` не читаем — без прокси Cloudflare его подделывает клиент): глобально 300 запросов/мин, 5000/час, 50 000/сутки. Строгие лимиты — точечные, на эндпоинтах из таблиц выше. Счётчики в памяти процесса.
 
 ## Деплой на Amvera
 
