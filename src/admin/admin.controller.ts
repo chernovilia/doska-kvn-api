@@ -14,73 +14,10 @@ import {
   UseGuards
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { MANAGED_SETTINGS } from '../settings/managed-settings';
 import { normalizeSearch } from '../ads/search-text';
 
 // Настройки, которыми управляет админка. default — если записи в БД ещё нет.
-const MANAGED_SETTINGS: Record<
-  string,
-  { label: string; hint: string; type: 'bool' | 'number'; default: string; min: number; max: number; step?: number }
-> = {
-  'moderation.autoApprove': {
-    label: 'Автопубликация',
-    hint: 'Выключено — новые объявления ждут одобрения в админке',
-    type: 'bool', default: 'true', min: 0, max: 1
-  },
-  'ads.lifetime_days': {
-    label: 'Срок показа объявления, дней',
-    hint: 'Потом — в архив; автор может продлить',
-    type: 'number', default: '60', min: 7, max: 365, step: 1
-  },
-  'ads.archive_keep_days': {
-    label: 'Хранить архив, дней',
-    hint: 'Потом объявление удаляется вместе с фото',
-    type: 'number', default: '90', min: 7, max: 365, step: 1
-  },
-  'ads.rejected_keep_days': {
-    label: 'Хранить отклонённые, дней',
-    hint: 'Потом удаляются вместе с фото',
-    type: 'number', default: '30', min: 3, max: 365, step: 1
-  },
-  'ads.lifecycle_warn_days': {
-    label: 'Предупреждать за, дней',
-    hint: 'Письмо автору перед архивом и перед удалением',
-    type: 'number', default: '3', min: 0, max: 14, step: 1
-  },
-  'reviews.min_messages': {
-    label: 'Отзыв: сообщений от каждого',
-    hint: 'Сколько сообщений должен написать каждый в переписке, чтобы оценить друг друга',
-    type: 'number', default: '4', min: 1, max: 30, step: 1
-  },
-  'reviews.min_hours': {
-    label: 'Отзыв: часов с начала переписки',
-    hint: 'Не раньше этого времени после первого сообщения',
-    type: 'number', default: '1', min: 0, max: 72, step: 1
-  },
-  'ranking.bump_cooldown_days': {
-    label: 'Поднять можно через, дней',
-    hint: 'После публикации или прошлого подъёма',
-    type: 'number', default: '10', min: 1, max: 90, step: 1
-  },
-  'ranking.boost_bonus': {
-    label: 'Бонус новым и поднятым',
-    hint: 'Прибавка к рейтингу на 24 часа; 0.15 ≈ сразу в топ',
-    type: 'number', default: '0.15', min: 0, max: 1, step: 0.05
-  },
-  'ranking.freshness_days': {
-    label: 'Свежесть, дней',
-    hint: 'За сколько дней объявление «стареет» до нуля',
-    type: 'number', default: '10', min: 1, max: 90, step: 1
-  },
-  'ranking.weight.freshness': { label: 'Вес: свежесть', hint: '', type: 'number', default: '0.35', min: 0, max: 1, step: 0.05 },
-  'ranking.weight.quality': { label: 'Вес: качество (фото, описание)', hint: '', type: 'number', default: '0.10', min: 0, max: 1, step: 0.05 },
-  'ranking.weight.trust': { label: 'Вес: доверие к автору', hint: 'Рейтинг и проверка', type: 'number', default: '0.15', min: 0, max: 1, step: 0.05 },
-  'ranking.weight.engagement': { label: 'Вес: интерес (просмотры)', hint: '', type: 'number', default: '0.10', min: 0, max: 1, step: 0.05 },
-  'ranking.same_author_max_top10': {
-    label: 'Макс. объявлений одного автора в топ-10',
-    hint: 'Чтобы один продавец не занял всю ленту',
-    type: 'number', default: '3', min: 1, max: 10, step: 1
-  }
-};
 
 function nameVariants(q: string) {
   const lower = q.toLowerCase();
@@ -93,7 +30,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { SupportService } from '../support/support.service';
 import { DAY_MS, lifecycleSettings, purgeAd } from '../ads/lifecycle';
-import { CONTACTS_KEY, CONTACT_FIELDS, NEIGHBORS_KEY, SiteContacts, readJsonSetting, writeJsonSetting } from '../settings/json-settings';
+import { APP_TEXTS_KEY, APP_TEXT_FIELDS, CONTACTS_KEY, CONTACT_FIELDS, NEIGHBORS_KEY, SiteContacts, readJsonSetting, writeJsonSetting } from '../settings/json-settings';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -576,6 +513,18 @@ export class AdminController {
     }
     await writeJsonSetting(this.prisma, NEIGHBORS_KEY, all, 'Соседние города для блока «В соседних городах»');
     return { neighbors: all };
+  }
+
+  // Тексты окна установки. Пустое поле — текст по умолчанию.
+  @Put('app-texts')
+  async setAppTexts(@Body() body: Record<string, unknown>) {
+    const texts: Record<string, string> = {};
+    for (const [f, max] of Object.entries(APP_TEXT_FIELDS)) {
+      const v = typeof body?.[f] === 'string' ? (body[f] as string).trim().slice(0, max) : '';
+      if (v) texts[f] = v;
+    }
+    await writeJsonSetting(this.prisma, APP_TEXTS_KEY, texts, 'Тексты окна установки приложения');
+    return { texts };
   }
 
   // Контакты в подвале сайта. Пустое поле — не показывается.
