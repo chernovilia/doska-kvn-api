@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 /**
  * Клиент к Timeweb S3 (S3-совместимое хранилище).
@@ -96,6 +96,27 @@ export class S3ClientService implements OnModuleInit {
       failed += results.filter((r) => r.status === 'rejected').length;
     }
     if (failed) this.logger.warn(`S3: не удалось удалить ${failed} из ${keys.length} объектов`);
+  }
+
+  // Все объекты под префиксом (ads/, avatars/) с датой изменения — для чистки потерянных фото.
+  async listObjects(prefix: string): Promise<{ key: string; lastModified: Date }[]> {
+    if (!this.configured) return [];
+    const out: { key: string; lastModified: Date }[] = [];
+    let token: string | undefined;
+    do {
+      const page = await this.client.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token })
+      );
+      for (const o of page.Contents || []) {
+        if (o.Key && o.LastModified) out.push({ key: o.Key, lastModified: o.LastModified });
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  }
+
+  urlFromKey(key: string): string {
+    return `${this.publicUrlBase}/${key}`;
   }
 
   // Из публичной ссылки достаём key (для удаления фото по URL).

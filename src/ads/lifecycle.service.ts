@@ -23,6 +23,7 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
   private readonly logger = new Logger('AdLifecycle');
   private timers: NodeJS.Timeout[] = [];
   private running = false;
+  private lastOrphanSweep = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -47,11 +48,59 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
     try {
       const stats = await this.step();
       if (Object.values(stats).some((n) => n > 0)) this.logger.log(JSON.stringify(stats));
+      // Раз в сутки — потерянные фото (загрузили и закрыли форму, сменили аватар).
+      if (Date.now() - this.lastOrphanSweep > 23 * 3_600_000) {
+        this.lastOrphanSweep = Date.now();
+        const removed = await this.sweepOrphanPhotos();
+        if (removed) this.logger.log(`Удалено потерянных фото: ${removed}`);
+      }
     } catch (err) {
       this.logger.error(`Прогон не удался: ${(err as Error).message}`);
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Фото в хранилище, на которые не ссылается ни одно объявление и ни один аватар, старше суток:
+   * загрузили в форму и закрыли вкладку, убрали фото, сменили аватар. Сутки — запас на то,
+   * чтобы не удалить фото из формы, которую человек ещё заполняет.
+   */
+  async sweepOrphanPhotos(): Promise<number> {
+    if (!this.s3.configured) return 0;
+    const cutoff = Date.now() - DAY_MS;
+    const objects = [...(await this.s3.listObjects('ads/')), ...(await this.s3.listObjects('avatars/'))].filter(
+      (o) => o.lastModified.getTime() < cutoff
+    );
+    if (!objects.length) return 0;
+    const [photos, avatars] = await Promise.all([
+      this.prisma.adPhoto.findMany({ select: { url: true } }),
+      this.prisma.user.findMany({ where: { avatar: { startsWith: 'http' } }, select: { avatar: true } })
+    ]);
+    // Ключ — по сегменту ads/… или avatars/…, а не по текущему адресу хранилища:
+    // если адрес когда-то менялся, у старых фото другой префикс, но тот же ключ.
+    const keyOf = (url: string) => url.match(/(?:^|\/)((?:ads|avatars)\/.+)$/)?.[1] ?? null;
+    const used = new Set<string>();
+    for (const p of photos) {
+      const key = keyOf(p.url);
+      if (!key) continue;
+      used.add(key);
+      used.add(key.replace(/\.webp$/, '-t.webp')); // миниатюра
+    }
+    for (const u of avatars) {
+      const key = u.avatar && keyOf(u.avatar);
+      if (key) used.add(key);
+    }
+    // Страховка: фото в базе есть, а ни одно не нашлось в хранилище — что-то не так с ключами, не трогаем.
+    const matched = objects.filter((o) => used.has(o.key)).length;
+    if (photos.length > 0 && matched === 0) {
+      this.logger.warn('Чистка фото пропущена: ни одно фото из базы не найдено в хранилище');
+      return 0;
+    }
+    const orphans = objects.filter((o) => !used.has(o.key)).map((o) => this.s3.urlFromKey(o.key));
+    // deleteByUrls сам добавит миниатюры; их отдельные ключи в списке тоже, дубли S3 не мешают.
+    await this.s3.deleteByUrls(orphans);
+    return orphans.length;
   }
 
   private async step() {

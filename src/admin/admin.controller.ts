@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Patch,
+  Put,
   Post,
   Query,
   Req,
@@ -91,6 +92,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { SupportService } from '../support/support.service';
 import { DAY_MS, lifecycleSettings, purgeAd } from '../ads/lifecycle';
+import { CONTACTS_KEY, CONTACT_FIELDS, NEIGHBORS_KEY, SiteContacts, readJsonSetting, writeJsonSetting } from '../settings/json-settings';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -518,6 +520,40 @@ export class AdminController {
       create: { key: body.key!, value, description: def.label }
     });
     return { key: body.key, value };
+  }
+
+  // ── Соседние города и контакты сайта ─────────────────────────────
+
+  // { cityId, neighbors: [cityId…] | null }: список соседей города для блока «В соседних городах».
+  // null — вернуть поведение по умолчанию (остальные города региона и соседние регионы).
+  @Put('neighbors')
+  async setNeighbors(@Body() body: { cityId?: string; neighbors?: string[] | null }) {
+    const cities = new Set((await this.prisma.city.findMany({ select: { id: true } })).map((c) => c.id));
+    if (!body?.cityId || !cities.has(body.cityId)) throw new BadRequestException('Неизвестный город');
+    const all = await readJsonSetting<Record<string, string[]>>(this.prisma, NEIGHBORS_KEY, {});
+    if (body.neighbors === null) {
+      delete all[body.cityId];
+    } else {
+      if (!Array.isArray(body.neighbors)) throw new BadRequestException('neighbors — список городов');
+      const list = [...new Set(body.neighbors)].filter((id) => id !== body.cityId);
+      if (list.some((id) => !cities.has(id)) || list.length > 20) throw new BadRequestException('Неизвестный город в списке');
+      all[body.cityId] = list;
+    }
+    await writeJsonSetting(this.prisma, NEIGHBORS_KEY, all, 'Соседние города для блока «В соседних городах»');
+    return { neighbors: all };
+  }
+
+  // Контакты в подвале сайта. Пустое поле — не показывается.
+  @Put('contacts')
+  async setContacts(@Body() body: Record<string, unknown>) {
+    const contacts: SiteContacts = {};
+    for (const f of CONTACT_FIELDS) {
+      const v = typeof body?.[f] === 'string' ? (body[f] as string).trim().slice(0, 200) : '';
+      if (v) contacts[f] = v;
+    }
+    if (contacts.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contacts.email)) throw new BadRequestException('Почта указана с ошибкой');
+    await writeJsonSetting(this.prisma, CONTACTS_KEY, contacts, 'Контакты в подвале сайта');
+    return { contacts };
   }
 
   // ── Поддержка ────────────────────────────────────────────────────

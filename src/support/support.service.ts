@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { adminUserIds } from '../auth/admin-check';
@@ -21,7 +21,13 @@ export class SupportService {
   ) {}
 
   // Заблокированные тоже могут писать: поддержка — место, где обжалуют блокировку.
+  // Одно подробное обращение — и ждём ответа: пока обращение без ответа, новое создать
+  // и дописать в старое нельзя (иначе очередь забивается «ну что там?»).
   async create(userId: string, dto: { topic: string; text: string }) {
+    const waiting = await this.prisma.supportTicket.count({ where: { userId, status: 'open' } });
+    if (waiting) {
+      throw new ConflictException('Поддержка ответит в ближайшее время. Новое обращение — после ответа на предыдущее');
+    }
     const ticket = await this.prisma.supportTicket.create({
       data: {
         userId,
@@ -47,6 +53,10 @@ export class SupportService {
   async addMessage(userId: string, ticketId: string, text: string) {
     const ticket = await this.prisma.supportTicket.findUnique({ where: { id: ticketId } });
     if (!ticket || ticket.userId !== userId) throw new NotFoundException('Ticket not found');
+    if (ticket.status === 'open') {
+      throw new ConflictException('Поддержка ответит в ближайшее время — дополнить обращение можно после ответа');
+    }
+    if (ticket.status === 'closed') throw new ConflictException('Обращение закрыто — создайте новое');
     const message = await this.prisma.supportMessage.create({ data: { ticketId, text: text.trim() } });
     // Новое сообщение пользователя снова ставит обращение в очередь.
     await this.prisma.supportTicket.update({ where: { id: ticketId }, data: { status: 'open' } });
