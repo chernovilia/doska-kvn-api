@@ -62,7 +62,7 @@ export function renderAuthCodeEmail(params: {
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Городская платформа объявлений, услуг и афиши<br>
       агломерации Кулебаки • Выкса • Навашино<br>
-      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">доска-квн.рф</a>
     </div>
   </div>
 </body>
@@ -138,7 +138,7 @@ export function renderNewMessageEmail(params: {
 
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Уведомления можно отключить в настройках профиля.<br>
-      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">доска-квн.рф</a>
     </div>
   </div>
 </body>
@@ -197,7 +197,7 @@ export function renderNotificationEmail(params: {
 
     <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;text-align:center;">
       Уведомления на почту можно отключить в настройках профиля.<br>
-      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">${brandUrl.replace(/^https?:\/\//, '')}</a>
+      <a href="${brandUrl}" style="color:#b35b22;text-decoration:none;">доска-квн.рф</a>
     </div>
   </div>
 </body>

@@ -6,6 +6,8 @@ import { renderAuthCodeEmail, renderNewMessageEmail, renderNotificationEmail } f
  * Реализация EmailSender через Unisender Go API.
  * Документация: https://godocs.unisender.ru/web-api-ref
  */
+const SITE_URL = process.env.FRONTEND_URL || 'https://xn----7sbhf4acwc1a.xn--p1ai';
+
 @Injectable()
 export class UnisenderGoSender implements EmailSender {
   private readonly logger = new Logger(UnisenderGoSender.name);
@@ -81,10 +83,12 @@ export class UnisenderGoSender implements EmailSender {
         // Без трекеров: транзакционные письма не нужно засорять пикселями
         track_links: 0,
         track_read: 0,
-        // Заголовок List-Unsubscribe помогает с deliverability на Mail.ru
-        headers: {
-          'List-Unsubscribe': `<mailto:${this.senderEmail}?subject=unsubscribe>`
-        }
+        // Код входа — без List-Unsubscribe: по этому заголовку Mail.ru и другие относят письмо
+        // к рассылкам (папка «Рассылки»), а код должен прийти во «Входящие».
+        // Уведомления — со ссылкой на настройки, где почту можно отключить.
+        ...(kind === 'auth code'
+          ? {}
+          : { headers: { 'List-Unsubscribe': `<${SITE_URL}/profile?tab=settings>` } })
       }
     };
 

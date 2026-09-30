@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ForbiddenException,
   Controller,
   Delete,
   Get,
@@ -189,6 +190,7 @@ export class AdminController {
       this.prisma.emailCode.count()
     ]);
     return {
+      wipeEnabled: process.env.ADMIN_WIPE_ENABLED === 'true',
       users, usersNew7d, usersOnboarded, blockedUsers,
       ads, approvedAds, pendingAds, rejectedAds, hiddenAds, archivedAds, adsNew7d,
       conversations, messages7d, reviews, favorites,
@@ -701,8 +703,13 @@ export class AdminController {
     return { ok: true };
   }
 
+  // Полный сброс данных — только там, где явно разрешён (ADMIN_WIPE_ENABLED=true, например локально).
+  // На проде переменной нет: при утечке админского доступа базу одной кнопкой не стереть.
   @Post('wipe')
   async wipe(@Query('confirm') confirm?: string) {
+    if (process.env.ADMIN_WIPE_ENABLED !== 'true') {
+      throw new ForbiddenException('Полный сброс выключен на этом сервере');
+    }
     if (confirm !== 'WIPE_ALL') {
       throw new BadRequestException('Pass ?confirm=WIPE_ALL to proceed');
     }
