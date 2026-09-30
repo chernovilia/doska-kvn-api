@@ -5,6 +5,7 @@ import cookieParser = require('cookie-parser');
 import helmet from 'helmet';
 import compression = require('compression');
 import { AppModule } from './app.module';
+import { guestIdMiddleware } from './guest-id';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -12,14 +13,14 @@ async function bootstrap() {
   });
   const logger = new Logger('bootstrap');
 
-  // req.ip — настоящий адрес клиента. Перед приложением на Amvera два внутренних прокси
-  // (10.x): с 'trust proxy', 1 сервер видел 10.128.0.97 у всех, и гости делили один лимит.
-  // Доверяем всем внутренним адресам — Express берёт первый внешний справа в X-Forwarded-For.
-  // Подделать нельзя: адрес, который дописал прокси Amvera, стоит правее присланного клиентом.
+  // Доверяем внутренним прокси Amvera (10.x). Но настоящий IP клиента до API не доходит:
+  // перед ингрессом ещё один прокси, и в X-Forwarded-For уже его адрес. Поэтому лимиты
+  // считаются не по IP, а по пользователю / e-mail / cookie гостя (guest-id.ts).
   app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cookieParser());
+  app.use(guestIdMiddleware);
   // gzip/brotli-клиентам: лента из 100 объявлений ~176 КБ → ~40 КБ
   app.use(compression());
 

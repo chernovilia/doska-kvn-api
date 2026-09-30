@@ -63,8 +63,8 @@ function clearAuthCookies(res: Response) {
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  // С одного адреса — не больше 5 кодов в минуту, 20 в час, 50 в сутки: иначе можно
-  // рассылать коды на чужие почты и портить репутацию отправителя в Unisender.
+  // На одну почту — не больше 5 кодов в минуту, 20 в час, 50 в сутки (ключ лимита — e-mail,
+  // см. AppThrottlerGuard). Против рассылки на много чужих почт — общий потолок в AuthService.
   @Post('email/request')
   @Throttle({
     short: { limit: 5, ttl: 60_000 },

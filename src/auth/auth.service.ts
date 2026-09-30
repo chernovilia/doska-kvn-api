@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -19,6 +21,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly intervalSec = Number(process.env.EMAIL_CODE_INTERVAL_SEC || 60);
   private readonly maxAttempts = Number(process.env.EMAIL_CODE_MAX_ATTEMPTS || 5);
+  private readonly siteCodesPerHour = Number(process.env.EMAIL_CODES_PER_HOUR || 500);
   private readonly accessTtl = Number(process.env.JWT_ACCESS_TTL_SEC || 900);
   private readonly refreshTtl = Number(process.env.JWT_REFRESH_TTL_SEC || 7776000);
   private readonly accessSecret =
@@ -48,6 +51,15 @@ export class AuthService {
   // ── Public: запрос кода на email ───────────────────────────────
 
   async requestEmailCode(email: string, ctx: { ip?: string; ua?: string }) {
+    // Общий потолок кодов на весь сайт в час: если кто-то рассылает коды на множество
+    // чужих почт, это не испортит репутацию отправителя. Настоящим людям хватает с запасом.
+    const lastHour = await this.prisma.emailCode.count({
+      where: { createdAt: { gte: new Date(Date.now() - 3_600_000) } }
+    });
+    if (lastHour >= this.siteCodesPerHour) {
+      throw new HttpException('Слишком много запросов кода. Попробуйте через несколько минут', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
     // Rate limit по email: не чаще чем раз в EMAIL_CODE_INTERVAL_SEC.
     const recent = await this.prisma.emailCode.findFirst({
       where: { email, usedAt: null },

@@ -5,10 +5,22 @@ import {
   InjectThrottlerStorage,
   ThrottlerGuard,
   ThrottlerModuleOptions,
+  ThrottlerRequest,
   ThrottlerStorage
 } from '@nestjs/throttler';
 import { AuthService } from './auth/auth.service';
+import { validGid } from './guest-id';
 
+// Запросы без cookie гостя (первый заход каждого посетителя, боты) делят один ключ —
+// ему лимит в NEW_GUEST_FACTOR раз больше, чтобы первые заходы людей не упирались в потолок.
+const NEW_GUEST_FACTOR = 10;
+const EMAIL_ROUTES = /\/auth\/email\/(request|verify)$/;
+
+/**
+ * Ключ лимита: вошедший — userId; вход по коду — e-mail (лимит на почту, а не на сайт);
+ * гость — анонимная cookie gid; без cookie — общий «новый гость».
+ * IP не используем: за прокси Amvera он у всех одинаковый (см. guest-id.ts).
+ */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
   constructor(
@@ -21,6 +33,10 @@ export class AppThrottlerGuard extends ThrottlerGuard {
   }
 
   protected async getTracker(req: Record<string, any>): Promise<string> {
+    const path: string = req.originalUrl?.split('?')[0] || req.url || '';
+    if (EMAIL_ROUTES.test(path) && typeof req.body?.email === 'string') {
+      return `email:${req.body.email.trim().toLowerCase().slice(0, 200)}`;
+    }
     const token = req.cookies?.access_token;
     if (token) {
       try {
@@ -30,9 +46,19 @@ export class AppThrottlerGuard extends ThrottlerGuard {
         // Просроченный или поддельный токен — считаем как гостя.
       }
     }
-    // Только req.ip (trust proxy 1 → адрес, который записал ингресс Amvera).
-    // CF-Connecting-IP не читаем: прокси Cloudflare выключен, и заголовок может
-    // прислать кто угодно — подставляя случайный «IP», обходили бы лимиты.
-    return `ip:${req.ip}`;
+    if (!req.newGuest) {
+      const gid = validGid(req.cookies?.gid);
+      if (gid) return `guest:${gid}`;
+    }
+    return 'new-guest';
+  }
+
+  protected async handleRequest(props: ThrottlerRequest): Promise<boolean> {
+    const req = props.context.switchToHttp().getRequest();
+    const tracker = await this.getTracker(req);
+    if (tracker === 'new-guest') {
+      return super.handleRequest({ ...props, limit: props.limit * NEW_GUEST_FACTOR });
+    }
+    return super.handleRequest(props);
   }
 }

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { createHash } from 'crypto';
+import { validGid } from '../guest-id';
 import { Throttle } from '@nestjs/throttler';
 import { AdsService } from './ads.service';
 import { ListAdsDto } from './dto/list-ads.dto';
@@ -46,7 +47,7 @@ export class AdsController {
     return this.ads.findById(id, req.userId);
   }
 
-  // Просмотр страницы объявления. Один раз в сутки на пользователя / браузер / IP.
+  // Просмотр страницы объявления. Один раз в сутки на пользователя / браузер.
   @UseGuards(OptionalJwtAuthGuard)
   @Post(':id/view')
   view(
@@ -54,10 +55,10 @@ export class AdsController {
     @Param('id') id: string,
     @Body() dto: ViewAdDto
   ) {
-    const ip = req.ip || ''; // не CF-Connecting-IP: без прокси Cloudflare его подделывает клиент
-    // Гость без localStorage (приватный режим) — по хэшу IP, сам IP не храним.
+    // Гость без localStorage (приватный режим) — по cookie гостя gid (IP за прокси Amvera у всех один).
+    const gid = validGid(req.cookies?.gid) || 'none';
     const sessionId =
-      dto.sessionId || 'ip-' + createHash('sha256').update(ip).digest('hex').slice(0, 24);
+      dto.sessionId || 'g-' + createHash('sha256').update(gid).digest('hex').slice(0, 24);
     return this.ads.registerView(id, { userId: req.userId, sessionId });
   }
 
