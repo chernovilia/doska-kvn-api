@@ -463,6 +463,7 @@ export class AdsService implements OnApplicationBootstrap {
             contactMethod: true,
             createdAt: true,
             blockedAt: true,
+            handle: { select: { username: true } },
             businessProfile: {
               select: {
                 slug: true,
@@ -480,7 +481,8 @@ export class AdsService implements OnApplicationBootstrap {
     if (!ad || ad.author.blockedAt) throw new NotFoundException('Ad not found');
     const privileged = viewerId === ad.authorId || (await isAdminUser(this.prisma, viewerId));
     if (ad.status !== AdStatus.approved && !privileged) throw new NotFoundException('Ad not found');
-    const { blockedAt: _blocked, ...author } = ad.author;
+    const { blockedAt: _blocked, handle, ...authorRest } = ad.author;
+    const author = { ...authorRest, username: handle?.username ?? null };
     const w = await this.getWeights();
     const lifecycle = privileged ? lifecycleInfo(ad, await lifecycleSettings(this.prisma)) : {};
     return publicAd({

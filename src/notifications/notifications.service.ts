@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
 import { EMAIL_SENDER_TOKEN, EmailSender } from '../auth/email-sender.interface';
 
 const SITE_URL = process.env.FRONTEND_URL || 'https://xn----7sbhf4acwc1a.xn--p1ai';
@@ -23,11 +24,12 @@ export class NotificationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(EMAIL_SENDER_TOKEN) private readonly email: EmailSender
+    @Inject(EMAIL_SENDER_TOKEN) private readonly email: EmailSender,
+    private readonly push: PushService
   ) {}
 
   /**
-   * Уведомление на сайте + письмо, если пользователь не отключил почту.
+   * Уведомление на сайте + пуш (если подписан) + письмо, если пользователь не отключил почту.
    * Письмо уходит фоном: сбой почты не должен ломать действие, которое уведомляет.
    */
   async notify(
@@ -42,6 +44,7 @@ export class NotificationsService {
     await this.prisma.notification.create({
       data: { userId, type: n.type, title: n.title, body: n.body ?? null, link: n.link ?? null }
     });
+    this.push.sendToUser(userId, { title: n.title, body: n.body, url: n.link || '/', tag: n.type });
     if (user.notifyEmail && user.email) {
       this.email
         .sendNotification({

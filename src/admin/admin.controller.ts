@@ -522,6 +522,39 @@ export class AdminController {
     return { key: body.key, value };
   }
 
+  // ── Приложение (PWA): установки, активность, пуши, воронка окна установки ──
+  @Get('app')
+  async appStats() {
+    const DAY = 86_400_000;
+    const week = new Date(Date.now() - 7 * DAY);
+    const month = new Date(Date.now() - 30 * DAY);
+    const [total, new7d, active7d, byPlatform, pushUsers, pushByPlatform, funnel, devices] = await Promise.all([
+      this.prisma.appDevice.count(),
+      this.prisma.appDevice.count({ where: { installedAt: { gte: week } } }),
+      this.prisma.appDevice.count({ where: { lastOpenAt: { gte: week } } }),
+      this.prisma.appDevice.groupBy({ by: ['platform'], _count: { _all: true } }),
+      this.prisma.pushSubscription.findMany({ distinct: ['userId'], select: { userId: true } }),
+      this.prisma.pushSubscription.groupBy({ by: ['platform'], _count: { _all: true } }),
+      this.prisma.appEventDaily.groupBy({ by: ['name'], where: { day: { gte: month } }, _sum: { count: true } }),
+      this.prisma.appDevice.findMany({
+        orderBy: { lastOpenAt: 'desc' },
+        take: 100,
+        include: { user: { select: { id: true, name: true, email: true, avatar: true } } }
+      })
+    ]);
+    const withPush = new Set(pushUsers.map((p) => p.userId));
+    return {
+      total,
+      new7d,
+      active7d,
+      byPlatform: Object.fromEntries(byPlatform.map((r) => [r.platform, r._count._all])),
+      pushUsers: withPush.size,
+      pushByPlatform: Object.fromEntries(pushByPlatform.map((r) => [r.platform || 'unknown', r._count._all])),
+      funnel30d: Object.fromEntries(funnel.map((r) => [r.name, r._sum.count ?? 0])),
+      devices: devices.map((d) => ({ ...d, push: !!d.userId && withPush.has(d.userId) }))
+    };
+  }
+
   // ── Соседние города и контакты сайта ─────────────────────────────
 
   // { cityId, neighbors: [cityId…] | null }: список соседей города для блока «В соседних городах».

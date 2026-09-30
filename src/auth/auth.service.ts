@@ -9,6 +9,7 @@ import {
   UnauthorizedException
 } from '@nestjs/common';
 import { isAllowedAvatar } from './avatars';
+import { normalizeUsername, usernameProblem } from '../users/username';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -303,10 +304,12 @@ export class AuthService {
       where: { id: userId },
       include: {
         businessProfile: true,
-        wallet: true
+        wallet: true,
+        handle: { select: { username: true } }
       }
     });
     if (!user) throw new UnauthorizedException('User not found');
+    const { handle, ...rest } = user;
 
     // Флаг для фронта: показывать ли ссылку на админку.
     // Ту же логику применяет AdminGuard на запросах в /admin/*.
@@ -319,7 +322,7 @@ export class AuthService {
       user.role === 'owner' ||
       (!!user.email && adminEmails.includes(user.email.toLowerCase()));
 
-    return { ...user, isAdmin };
+    return { ...rest, username: handle?.username ?? null, isAdmin };
   }
 
   async updateMe(
@@ -334,9 +337,28 @@ export class AuthService {
       avatar?: string | null;
       markOnboarded?: boolean;
       agreeTerms?: boolean;
+      username?: string | null;
     }
   ) {
     const data: Record<string, unknown> = {};
+
+    if (dto.username !== undefined) {
+      const username = dto.username ? normalizeUsername(dto.username) : '';
+      if (!username) {
+        await this.prisma.userHandle.deleteMany({ where: { userId } });
+      } else {
+        const problem = usernameProblem(username);
+        if (problem) throw new BadRequestException(problem);
+        const taken = await this.prisma.userHandle.findUnique({ where: { username } });
+        if (taken && taken.userId !== userId) throw new BadRequestException('Этот адрес уже занят');
+        try {
+          await this.prisma.userHandle.upsert({ where: { userId }, update: { username }, create: { userId, username } });
+        } catch (err: any) {
+          if (err?.code === 'P2002') throw new BadRequestException('Этот адрес уже занят');
+          throw err;
+        }
+      }
+    }
 
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.homeCityId !== undefined) {

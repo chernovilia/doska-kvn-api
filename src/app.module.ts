@@ -17,6 +17,8 @@ import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { SupportModule } from './support/support.module';
+import { PushModule } from './push/push.module';
+import { PwaModule } from './pwa/pwa.module';
 
 @Module({
   imports: [
@@ -42,7 +44,9 @@ import { SupportModule } from './support/support.module';
     UsersModule,
     NotificationsModule,
     ReviewsModule,
-    SupportModule
+    SupportModule,
+    PushModule,
+    PwaModule
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }]
 })

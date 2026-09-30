@@ -115,6 +115,9 @@ model User {
   reviewsReceived Review[]       @relation("ReviewTarget")
   notifications   Notification[]
   supportTickets  SupportTicket[]
+  appDevices      AppDevice[]
+  pushSubscriptions PushSubscription[]
+  handle          UserHandle?
 
   @@index([role])
   @@index([type])
@@ -722,4 +725,55 @@ model SupportMessage {
   createdAt DateTime      @default(now())
 
   @@index([ticketId, createdAt])
+}
+
+// Установленное приложение (PWA) на устройстве: когда впервые и последний раз открывали с иконки.
+// id — случайный id устройства из localStorage приложения. Удаление приложения браузер не сообщает.
+model AppDevice {
+  id          String   @id
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  platform    String                     // ios | android | desktop
+  browser     String?
+  source      String                     // appinstalled (Android/Chrome сообщил) | standalone (открыли с иконки)
+  installedAt DateTime @default(now())
+  lastOpenAt  DateTime @default(now())
+  opens       Int      @default(1)
+
+  @@index([userId])
+  @@index([installedAt])
+}
+
+// Воронка окна установки по дням: показали, нажали «Установить», установили.
+model AppEventDaily {
+  day   DateTime @db.Date
+  name  String
+  count Int      @default(0)
+
+  @@id([day, name])
+}
+
+// Подписка на пуши (Web Push) — одна на браузер или установленное приложение.
+model PushSubscription {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String    @unique
+  p256dh    String
+  auth      String
+  platform  String?
+  deviceId  String?
+  createdAt DateTime  @default(now())
+  lastOkAt  DateTime?
+
+  @@index([userId])
+}
+
+// Свой адрес страницы пользователя: /u/<username>. Отдельная таблица, а не поле User:
+// уникальное поле в существующей таблице prisma db push при старте не добавит без --accept-data-loss.
+model UserHandle {
+  username  String   @id
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
 }

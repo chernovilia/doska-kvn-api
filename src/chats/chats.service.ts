@@ -8,6 +8,8 @@ import {
 import { assertNotBlocked } from '../auth/blocked';
 import { AdStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
+import { countUnreadMessages } from './unread';
 import { EMAIL_SENDER_TOKEN, EmailSender } from '../auth/email-sender.interface';
 
 type Role = 'buyer' | 'seller';
@@ -21,7 +23,8 @@ export class ChatsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(EMAIL_SENDER_TOKEN) private readonly email: EmailSender
+    @Inject(EMAIL_SENDER_TOKEN) private readonly email: EmailSender,
+    private readonly push: PushService
   ) {}
 
   private roleOf(c: { buyerId: string; sellerId: string }, userId: string): Role | null {
@@ -103,17 +106,7 @@ export class ChatsService {
   }
 
   async unreadCount(userId: string) {
-    const rows = await this.prisma.$queryRaw<{ count: number }[]>`
-      SELECT COUNT(*)::int AS count
-      FROM "Message" m
-      JOIN "Conversation" c ON c.id = m."conversationId"
-      WHERE m."senderId" <> ${userId}
-        AND (
-          (c."buyerId" = ${userId} AND (c."buyerLastReadAt" IS NULL OR m."createdAt" > c."buyerLastReadAt"))
-          OR
-          (c."sellerId" = ${userId} AND (c."sellerLastReadAt" IS NULL OR m."createdAt" > c."sellerLastReadAt"))
-        )`;
-    return { count: rows[0]?.count ?? 0 };
+    return { count: await countUnreadMessages(this.prisma, userId) };
   }
 
   // after — ISO-время последнего полученного сообщения: для опроса отдаём только новые.
@@ -211,6 +204,14 @@ export class ChatsService {
         }
       })
     ]);
+
+    // Пуш — на каждое сообщение, но одно уведомление на диалог (tag): новое заменяет прошлое.
+    this.push.sendToUser(recipient.id, {
+      title: sender.name || 'Новое сообщение',
+      body: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+      url: `/messages?chat=${c.id}`,
+      tag: `chat-${c.id}`
+    });
 
     if (alreadyUnread === 0 && recipient.notifyEmail && recipient.email) {
       this.email
