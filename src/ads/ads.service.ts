@@ -9,7 +9,7 @@ import { DAY_MS, lifecycleInfo, lifecycleSettings, purgeAd } from './lifecycle';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
-import { ListAdsDto } from './dto/list-ads.dto';
+import { ListAdsDto, MAX_FEED_OFFSET } from './dto/list-ads.dto';
 import { CreateAdDto } from './dto/create-ad.dto';
 import { FREE_FROM_SECTIONS, FREE_SECTION } from './sections';
 import { AdStatus, Prisma, UserType } from '@prisma/client';
@@ -101,6 +101,9 @@ interface RankingWeights {
   boostBonus: number;
   bumpCooldownDays: number;
 }
+
+// Сколько самых свежих объявлений участвует в ранжировании «Сначала лучшие»; глубже — по дате.
+const RANK_WINDOW = 200;
 
 @Injectable()
 export class AdsService implements OnApplicationBootstrap {
@@ -213,7 +216,7 @@ export class AdsService implements OnApplicationBootstrap {
     const rating = ad.author?.rating ?? 0;
     const trust = (ad.author?.verified ? 0.5 : 0) + rating / 10;
 
-    const hasPhotos = (ad.photos?.length ?? 0) > 0;
+    const hasPhotos = (ad.photos?.length ?? ad._count?.photos ?? 0) > 0;
     const hasDescription = (ad.description || '').length > 50;
     const quality = (hasPhotos ? 0.5 : 0) + (hasDescription ? 0.5 : 0);
 
@@ -300,6 +303,9 @@ export class AdsService implements OnApplicationBootstrap {
 
     const where: Prisma.AdWhereInput = {
       status: AdStatus.approved,
+      // У опубликованных дата публикации есть всегда; условие нужно, чтобы сортировку по дате
+      // обслуживал индекс (cityId|regionId, status, publishedAt)
+      publishedAt: { not: null },
       author: { blockedAt: null }, // объявления заблокированных не показываем
       ...placeWhere,
       ...sectionWhere,
@@ -321,47 +327,99 @@ export class AdsService implements OnApplicationBootstrap {
       photos: { orderBy: { order: 'asc' as const } }
     };
 
-    // По цене сортирует сама БД: ранкинг и VIP здесь не применяются.
-    if (q.sort === 'cheap' || q.sort === 'expensive') {
-      const [items, total] = await Promise.all([
-        this.prisma.ad.findMany({
-          where,
-          orderBy: [{ price: q.sort === 'cheap' ? 'asc' : 'desc' }, { createdAt: 'desc' }],
-          skip: q.offset ?? 0,
-          take: q.limit ?? 100,
-          include
-        }),
-        this.prisma.ad.count({ where })
-      ]);
-      return { items: items.map(publicAd), total };
-    }
+    const limit = q.limit ?? 100;
+    const offset = q.offset ?? 0;
+    const byDate: Prisma.AdOrderByWithRelationInput[] = [{ publishedAt: 'desc' }, { createdAt: 'desc' }];
+    // Общее число не считаем (на большой базе это самый тяжёлый запрос): берём на одно объявление
+    // больше — так узнаём, есть ли что показать по «Показать ещё».
+    const canGoDeeper = offset + limit <= MAX_FEED_OFFSET;
+    const page = <T,>(rows: T[]) => ({ items: rows.slice(0, limit), hasMore: rows.length > limit && canGoDeeper });
 
-    // Тянем чуть с запасом: score-сортировка + правила потом обрежут.
-    const takeRaw = Math.min(300, (q.limit ?? 100) + 100);
-
-    const [rawItems, total] = await Promise.all([
-      this.prisma.ad.findMany({
+    // По цене и по дате сортирует сама БД: ранкинг и VIP здесь не применяются.
+    if (q.sort === 'cheap' || q.sort === 'expensive' || q.sort === 'recent') {
+      const rows = await this.prisma.ad.findMany({
         where,
-        orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }], // предварительная сортировка
-        take: takeRaw,
+        orderBy:
+          q.sort === 'recent'
+            ? byDate
+            : ([{ price: q.sort === 'cheap' ? 'asc' : 'desc' }, { createdAt: 'desc' }] as Prisma.AdOrderByWithRelationInput[]),
+        skip: offset,
+        take: limit + 1,
         include
-      }),
-      this.prisma.ad.count({ where })
-    ]);
-
-    // Ранкинг: либо recent (по дате), либо top (по score).
-    let sorted;
-    if (q.sort === 'recent') {
-      sorted = rawItems; // уже отсортированы по дате публикации
-    } else {
-      const w = await this.getWeights();
-      const withScore = rawItems.map((a) => ({ ...a, _score: this.computeScore(a, w) }));
-      withScore.sort((a, b) => b._score - a._score);
-      sorted = this.applyRules(withScore, w);
+      });
+      const { items, hasMore } = page(rows);
+      return { items: items.map(publicAd), hasMore };
     }
 
-    const items = sorted.slice(q.offset ?? 0, (q.offset ?? 0) + (q.limit ?? 100));
-    return { items: items.map(publicAd), total };
+    // «Сначала лучшие». Ранжируем окно самых свежих объявлений (плюс поднятые за сутки — они могут
+    // быть старыми), дальше лента идёт просто по дате. Для окна берём только поля формулы,
+    // полные карточки с фото — лишь для страницы, которую отдаём.
+    const windowSize = limit <= 20 ? Math.max(40, limit * 4) : RANK_WINDOW;
+    const light = {
+      id: true,
+      authorId: true,
+      publishedAt: true,
+      createdAt: true,
+      boostedAt: true,
+      promoLevel: true,
+      viewsCount: true,
+      writeClicksCount: true,
+      description: true,
+      author: { select: { rating: true, verified: true } }
+    };
+    const fresh = await this.prisma.ad.findMany({ where, orderBy: byDate, take: windowSize, select: light });
+    const windowFull = fresh.length === windowSize;
+    // Поднятые за последние сутки, которые не попали в окно свежих
+    const boosted = windowFull
+      ? await this.prisma.ad.findMany({
+          where: { ...where, boostedAt: { gte: new Date(Date.now() - 24 * 3_600_000) }, id: { notIn: fresh.map((a) => a.id) } },
+          orderBy: { boostedAt: 'desc' },
+          take: 50,
+          select: light
+        })
+      : [];
+    const candidates = [...fresh, ...boosted];
+    // Есть ли фото — отдельным лёгким запросом по индексу (счётчик через _count заставлял базу
+    // пересчитывать всю таблицу фото на каждый запрос ленты)
+    const withPhotos = new Set(
+      (
+        await this.prisma.adPhoto.findMany({
+          where: { adId: { in: candidates.map((a) => a.id) } },
+          distinct: ['adId'],
+          select: { adId: true }
+        })
+      ).map((ph) => ph.adId)
+    );
+    const w = await this.getWeights();
+    const withScore = candidates.map((a) => ({
+      ...a,
+      _score: this.computeScore({ ...a, _count: { photos: withPhotos.has(a.id) ? 1 : 0 } }, w)
+    }));
+    withScore.sort((x, y) => y._score - x._score);
+    const ranked: { id: string }[] = this.applyRules(withScore, w);
+
+    const rankedIds = ranked.slice(offset, offset + limit).map((a) => a.id);
+    const rankedFull = rankedIds.length
+      ? await this.prisma.ad.findMany({ where: { id: { in: rankedIds } }, include })
+      : [];
+    const byId = new Map(rankedFull.map((a) => [a.id, a]));
+    const items = rankedIds.map((id) => byId.get(id)).filter((a): a is NonNullable<typeof a> => !!a);
+
+    let hasMore = ranked.length > offset + limit;
+    // Окно кончилось — продолжаем по дате с того места, где оно закончилось.
+    if (windowFull && !hasMore) {
+      const need = limit - rankedIds.length;
+      const tail = await this.prisma.ad.findMany({
+        where: boosted.length ? { ...where, id: { notIn: boosted.map((a) => a.id) } } : where,
+        orderBy: byDate,
+        skip: windowSize + Math.max(0, offset - ranked.length),
+        take: need + 1,
+        include
+      });
+      items.push(...tail.slice(0, need));
+      hasMore = tail.length > need;
+    }
+    return { items: items.map(publicAd), hasMore: hasMore && canGoDeeper };
   }
 
   // Телефон — только по отдельному запросу авторизованного юзера, чтобы его нельзя было

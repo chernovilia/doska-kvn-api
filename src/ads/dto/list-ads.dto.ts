@@ -1,6 +1,9 @@
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
+// Глубже лента не листается: дальние страницы дороги для базы, а людям нужны поиск и фильтры.
+export const MAX_FEED_OFFSET = 3000;
+
 export class ListAdsDto {
   // «Место» — id региона (kvn) или id города (vyksa).
   @IsOptional()
@@ -46,6 +49,7 @@ export class ListAdsDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(MAX_FEED_OFFSET)
   offset?: number = 0;
 
   @IsOptional()
