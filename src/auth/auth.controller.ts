@@ -1,5 +1,6 @@
 import { Throttle } from '@nestjs/throttler';
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -135,6 +136,21 @@ export class AuthController {
       clearAuthCookies(res);
       return { ok: false, error: 'refresh_invalid' };
     }
+  }
+
+  // Закрыть сессии на всех других устройствах. Живёт под /auth: cookie refresh_token
+  // (по ней узнаём текущую сессию) браузер отправляет только на /v1/auth/*.
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-others')
+  @HttpCode(200)
+  @Throttle({ medium: { limit: 10, ttl: 60 * 60_000 } })
+  async logoutOthers(
+    @CurrentUser() userId: string,
+    @Req() req: Request & { cookies?: Record<string, string> }
+  ) {
+    // Без cookie текущей сессии закрыли бы и её — лучше отказать
+    if (!req.cookies?.refresh_token) throw new BadRequestException('Сессия не найдена. Войдите заново');
+    return this.auth.logoutOthers(userId, req.cookies.refresh_token);
   }
 
   @Post('logout')

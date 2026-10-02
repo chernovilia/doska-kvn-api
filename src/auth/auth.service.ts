@@ -15,7 +15,8 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EMAIL_SENDER_TOKEN, EmailSender } from './email-sender.interface';
 
-const EMAIL_CODE_TTL_MIN = 15;
+// С запасом: письмо может задержаться у почтового сервиса (у Unisender бывали очереди по 20–30 минут)
+const EMAIL_CODE_TTL_MIN = 30;
 
 @Injectable()
 export class AuthService {
@@ -290,6 +291,27 @@ export class AuthService {
       // Игнорируем — токен уже недействителен.
     }
     return { ok: true };
+  }
+
+  // «Выйти на других устройствах»: все сессии, кроме текущей, закрываются; пуши отвязываются
+  // от всех устройств (это устройство пришлёт свою подписку заново). Чужие устройства теряют
+  // доступ в течение срока access-токена (до 15 минут).
+  async logoutOthers(userId: string, currentRefreshToken?: string) {
+    let keepId: string | undefined;
+    if (currentRefreshToken) {
+      try {
+        const payload = await this.jwt.verifyAsync(currentRefreshToken, { secret: this.refreshSecret });
+        if (payload.sub === userId) keepId = payload.jti;
+      } catch {
+        // Текущая сессия без действующего refresh — закрываем все
+      }
+    }
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() }, ...(keepId ? { id: { not: keepId } } : {}) },
+      data: { revokedAt: new Date() }
+    });
+    await this.prisma.pushSubscription.deleteMany({ where: { userId } });
+    return { ok: true, closed: count };
   }
 
   async verifyAccessToken(token: string): Promise<{ userId: string }> {
