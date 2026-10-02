@@ -32,3 +32,15 @@ export async function writeJsonSetting(prisma: PrismaService, key: string, value
   const json = JSON.stringify(value);
   await prisma.setting.upsert({ where: { key }, update: { value: json }, create: { key, value: json, description } });
 }
+
+// Юридические тексты (правила, политика конфиденциальности). Нет записи — сайт показывает
+// текст по умолчанию из своего кода. Формат — простая разметка, см. components/LegalDoc.jsx на сайте.
+export const LEGAL_DOCS = ['terms', 'privacy'] as const;
+export type LegalDocName = (typeof LEGAL_DOCS)[number];
+export const LEGAL_MAX_LENGTH = 120_000;
+export const legalKey = (doc: LegalDocName) => `legal.${doc}`;
+export type LegalDoc = { text: string; date: string }; // date — дата редакции, ГГГГ-ММ-ДД
+
+export function isLegalDoc(v: string): v is LegalDocName {
+  return (LEGAL_DOCS as readonly string[]).includes(v);
+}

@@ -55,12 +55,29 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
         this.lastOrphanSweep = Date.now();
         const removed = await this.sweepOrphanPhotos();
         if (removed) this.logger.log(`Удалено потерянных фото: ${removed}`);
+        const tech = await this.sweepTechnicalData();
+        if (tech) this.logger.log(`Удалено технических записей (коды входа, старые сессии): ${tech}`);
       }
     } catch (err) {
       this.logger.error(`Прогон не удался: ${(err as Error).message}`);
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Технические данные храним не дольше 30 дней (так обещано в политике конфиденциальности):
+   * коды входа и закрытые или истёкшие сессии — в них IP и User-Agent.
+   */
+  async sweepTechnicalData(): Promise<number> {
+    const cutoff = new Date(Date.now() - 30 * 24 * 3_600_000);
+    const [codes, sessions] = await Promise.all([
+      this.prisma.emailCode.deleteMany({ where: { createdAt: { lt: cutoff } } }),
+      this.prisma.refreshToken.deleteMany({
+        where: { OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }] }
+      })
+    ]);
+    return codes.count + sessions.count;
   }
 
   /**

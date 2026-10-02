@@ -33,7 +33,19 @@ import { SupportService } from '../support/support.service';
 import { AdsService } from '../ads/ads.service';
 import { PlaceAdForUserDto } from './place-ad-for-user.dto';
 import { DAY_MS, lifecycleSettings, purgeAd } from '../ads/lifecycle';
-import { APP_TEXTS_KEY, APP_TEXT_FIELDS, CONTACTS_KEY, CONTACT_FIELDS, NEIGHBORS_KEY, SiteContacts, readJsonSetting, writeJsonSetting } from '../settings/json-settings';
+import {
+  APP_TEXTS_KEY,
+  APP_TEXT_FIELDS,
+  CONTACTS_KEY,
+  CONTACT_FIELDS,
+  LEGAL_MAX_LENGTH,
+  NEIGHBORS_KEY,
+  SiteContacts,
+  isLegalDoc,
+  legalKey,
+  readJsonSetting,
+  writeJsonSetting
+} from '../settings/json-settings';
 
 /**
  * Служебная админка. Все роуты защищены AdminGuard —
@@ -553,6 +565,26 @@ export class AdminController {
     if (contacts.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contacts.email)) throw new BadRequestException('Почта указана с ошибкой');
     await writeJsonSetting(this.prisma, CONTACTS_KEY, contacts, 'Контакты в подвале сайта');
     return { contacts };
+  }
+
+  // Правила и политика конфиденциальности: { text, date } — текст в простой разметке и дата редакции.
+  @Put('legal/:doc')
+  async setLegal(@Param('doc') doc: string, @Body() body: { text?: string; date?: string }) {
+    if (!isLegalDoc(doc)) throw new BadRequestException('Неизвестный документ');
+    const text = typeof body?.text === 'string' ? body.text.replace(/\r\n/g, '\n').trim() : '';
+    if (text.length < 200) throw new BadRequestException('Текст слишком короткий');
+    if (text.length > LEGAL_MAX_LENGTH) throw new BadRequestException('Текст слишком длинный');
+    const date = typeof body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 10);
+    await writeJsonSetting(this.prisma, legalKey(doc), { text, date }, doc === 'terms' ? 'Правила сервиса' : 'Политика конфиденциальности');
+    return { doc, custom: true, text, date };
+  }
+
+  // Вернуть текст по умолчанию (тот, что в коде сайта).
+  @Delete('legal/:doc')
+  async resetLegal(@Param('doc') doc: string) {
+    if (!isLegalDoc(doc)) throw new BadRequestException('Неизвестный документ');
+    await this.prisma.setting.deleteMany({ where: { key: legalKey(doc) } });
+    return { doc, custom: false, text: null, date: null };
   }
 
   // ── Поддержка ────────────────────────────────────────────────────

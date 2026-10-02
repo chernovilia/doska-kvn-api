@@ -1,6 +1,15 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { APP_TEXTS_KEY, CONTACTS_KEY, NEIGHBORS_KEY, SiteContacts, readJsonSetting } from '../settings/json-settings';
+import {
+  APP_TEXTS_KEY,
+  CONTACTS_KEY,
+  LegalDoc,
+  NEIGHBORS_KEY,
+  SiteContacts,
+  isLegalDoc,
+  legalKey,
+  readJsonSetting
+} from '../settings/json-settings';
 import { MANAGED_SETTINGS } from '../settings/managed-settings';
 
 @Controller()
@@ -32,6 +41,16 @@ export class RegionsController {
       bumpCooldownDays: Number(byKey.get('ranking.bump_cooldown_days') ?? MANAGED_SETTINGS['ranking.bump_cooldown_days'].default)
     };
     return { neighbors, contacts, app, features };
+  }
+
+  // Правила и политика конфиденциальности: текст из админки. custom: false — в админке не меняли,
+  // сайт показывает текст по умолчанию.
+  @Get('legal/:doc')
+  async legal(@Param('doc') doc: string) {
+    if (!isLegalDoc(doc)) throw new NotFoundException('Unknown document');
+    const saved = await readJsonSetting<LegalDoc | null>(this.prisma, legalKey(doc), null);
+    if (!saved?.text) return { doc, custom: false, text: null, date: null };
+    return { doc, custom: true, text: saved.text, date: saved.date };
   }
 
   @Get('regions')
