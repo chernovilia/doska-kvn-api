@@ -174,7 +174,7 @@ export class AdsService implements OnApplicationBootstrap {
     return new Date(from + w.bumpCooldownDays * 24 * 3_600_000);
   }
 
-  // Бесплатный подъём: boostedAt = now → +boostBonus в computeScore на 24 часа.
+  // Бесплатный подъём: boostedAt = now → свежесть считается от подъёма, плюс boostBonus на 24 часа.
   async bump(userId: string, adId: string) {
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
@@ -206,9 +206,11 @@ export class AdsService implements OnApplicationBootstrap {
 
   private computeScore(ad: any, w: RankingWeights): number {
     const now = Date.now();
-    // Свежесть — от публикации: объявление, которое ждало модерацию, не должно «стареть» в очереди.
+    // Свежесть — от публикации (объявление, которое ждало модерацию, не должно «стареть» в очереди)
+    // или от подъёма: поднятое встаёт наверх как новое и дальше опускается вместе со всеми.
     const published = new Date(ad.publishedAt ?? ad.createdAt).getTime();
-    const hours = (now - published) / 3_600_000;
+    const lift = Math.max(published, ad.boostedAt ? new Date(ad.boostedAt).getTime() : 0);
+    const hours = (now - lift) / 3_600_000;
     const freshness = Math.max(0, 1 - hours / (24 * w.freshnessDays));
 
     const promo = (ad.promoLevel || 0) / 4;
@@ -233,7 +235,6 @@ export class AdsService implements OnApplicationBootstrap {
       engagement * w.engagement;
 
     // Первые 24 часа после публикации или подъёма — бонус: новое объявление сразу наверху.
-    const lift = Math.max(published, ad.boostedAt ? new Date(ad.boostedAt).getTime() : 0);
     if ((now - lift) / 3_600_000 < 24) score += w.boostBonus;
     return score;
   }
@@ -351,7 +352,7 @@ export class AdsService implements OnApplicationBootstrap {
       return { items: items.map(publicAd), hasMore };
     }
 
-    // «Сначала лучшие». Ранжируем окно самых свежих объявлений (плюс поднятые за сутки — они могут
+    // «Сначала лучшие». Ранжируем окно самых свежих объявлений (плюс недавно поднятые — они могут
     // быть старыми), дальше лента идёт просто по дате. Для окна берём только поля формулы,
     // полные карточки с фото — лишь для страницы, которую отдаём.
     const windowSize = limit <= 20 ? Math.max(40, limit * 4) : RANK_WINDOW;
@@ -367,14 +368,20 @@ export class AdsService implements OnApplicationBootstrap {
       description: true,
       author: { select: { rating: true, verified: true } }
     };
+    const w = await this.getWeights();
     const fresh = await this.prisma.ad.findMany({ where, orderBy: byDate, take: windowSize, select: light });
     const windowFull = fresh.length === windowSize;
-    // Поднятые за последние сутки, которые не попали в окно свежих
+    // Поднятые, у которых свежесть от подъёма ещё не вышла, но в окно свежих по дате публикации
+    // они не попали
     const boosted = windowFull
       ? await this.prisma.ad.findMany({
-          where: { ...where, boostedAt: { gte: new Date(Date.now() - 24 * 3_600_000) }, id: { notIn: fresh.map((a) => a.id) } },
+          where: {
+            ...where,
+            boostedAt: { gte: new Date(Date.now() - w.freshnessDays * 24 * 3_600_000) },
+            id: { notIn: fresh.map((a) => a.id) }
+          },
           orderBy: { boostedAt: 'desc' },
-          take: 50,
+          take: 100,
           select: light
         })
       : [];
@@ -390,7 +397,6 @@ export class AdsService implements OnApplicationBootstrap {
         })
       ).map((ph) => ph.adId)
     );
-    const w = await this.getWeights();
     const withScore = candidates.map((a) => ({
       ...a,
       _score: this.computeScore({ ...a, _count: { photos: withPhotos.has(a.id) ? 1 : 0 } }, w)

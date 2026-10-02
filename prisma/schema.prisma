@@ -292,7 +292,7 @@ model Ad {
   // Лента города и региона: сортировка по дате публикации без перебора всей таблицы
   @@index([cityId, status, publishedAt(sort: Desc), createdAt(sort: Desc)])
   @@index([regionId, status, publishedAt(sort: Desc), createdAt(sort: Desc)])
-  // Поднятые за последние сутки — для ленты «Сначала лучшие»
+  // Недавно поднятые — для ленты «Сначала лучшие»
   @@index([boostedAt])
   @@index([status, createdAt])
   @@index([promoLevel, promoExpiresAt])
