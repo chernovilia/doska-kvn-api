@@ -10,6 +10,9 @@ export const SECTION_IDS = [
   'kids',
   'pets',
   'hobby',
+  'food',
+  'business',
+  'lost',
   'events'
 ] as const;
 
