@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -73,6 +74,11 @@ export class CreateAdDto {
   eventDate?: string;
 
 
+
+  // Автоподнятие: поднимать само каждые ranking.bump_cooldown_days (если разрешено в админке).
+  @IsOptional()
+  @IsBoolean()
+  autoBump?: boolean;
 
   // URLs фото, уже загруженных через POST /uploads/ad-photo.
   // Порядок в массиве = порядок отображения в галерее (первое — обложка).

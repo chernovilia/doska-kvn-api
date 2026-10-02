@@ -555,18 +555,36 @@ export class AdsService implements OnApplicationBootstrap {
     }
   }
 
-  async create(userId: string, dto: CreateAdDto) {
+  private async autoBumpAllowed(): Promise<boolean> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'ranking.auto_bump_enabled' } });
+    return (row?.value ?? 'true') === 'true';
+  }
+
+  // Автор включает или выключает автоподнятие своего объявления (страница продвижения).
+  async setAutoBump(userId: string, adId: string, enabled: boolean) {
+    const ad = await this.prisma.ad.findUnique({ where: { id: adId }, select: { authorId: true } });
+    if (!ad) throw new NotFoundException('Ad not found');
+    if (ad.authorId !== userId) throw new BadRequestException('Not your ad');
+    if (enabled && !(await this.autoBumpAllowed())) throw new BadRequestException('Автоподнятие сейчас недоступно');
+    const updated = await this.prisma.ad.update({ where: { id: adId }, data: { autoBump: enabled }, select: { autoBump: true } });
+    return updated;
+  }
+
+  // opts.byAdmin — размещает администратор за пользователя: сразу опубликовано, с пометкой.
+  async create(userId: string, dto: CreateAdDto, opts: { byAdmin?: boolean } = {}) {
     await assertNotBlocked(this.prisma, userId);
     const author = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!author) throw new BadRequestException('Unknown author');
     const { data, photoUrls } = await this.adFields(dto);
 
-    const status = await this.initialAdStatus();
+    const status = opts.byAdmin ? AdStatus.approved : await this.initialAdStatus();
     const { lifetimeDays } = await lifecycleSettings(this.prisma);
 
     const created = await this.prisma.ad.create({
       data: {
         ...data,
+        autoBump: !!dto.autoBump && (await this.autoBumpAllowed()),
+        placedByAdmin: !!opts.byAdmin,
         authorId: author.id,
         // Снапшот на момент публикации
         authorType: author.type,
@@ -623,6 +641,8 @@ export class AdsService implements OnApplicationBootstrap {
         where: { id: adId },
         data: {
           ...data,
+          // Правка без поля autoBump (старые клиенты) — настройку не трогаем
+          ...(dto.autoBump === undefined ? {} : { autoBump: dto.autoBump && (await this.autoBumpAllowed()) }),
           status,
           moderationNotes: null,
           publishedAt: approved ? (ad.publishedAt ?? now) : ad.publishedAt,

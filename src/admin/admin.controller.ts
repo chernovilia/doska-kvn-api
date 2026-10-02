@@ -29,6 +29,8 @@ import { AdminGuard } from './admin.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { SupportService } from '../support/support.service';
+import { AdsService } from '../ads/ads.service';
+import { PlaceAdForUserDto } from './place-ad-for-user.dto';
 import { DAY_MS, lifecycleSettings, purgeAd } from '../ads/lifecycle';
 import { APP_TEXTS_KEY, APP_TEXT_FIELDS, CONTACTS_KEY, CONTACT_FIELDS, NEIGHBORS_KEY, SiteContacts, readJsonSetting, writeJsonSetting } from '../settings/json-settings';
 
@@ -47,39 +49,9 @@ export class AdminController {
     private readonly s3: S3ClientService,
     private readonly notifications: NotificationsService,
     private readonly reviews: ReviewsService,
-    private readonly support: SupportService
+    private readonly support: SupportService,
+    private readonly adsService: AdsService
   ) {}
-
-  // ── Модерация ────────────────────────────────────────────────────
-  // Ключ Setting: 'moderation.autoApprove' ('true' | 'false').
-  // Если запись отсутствует — считаем что автопубликация включена (MVP).
-
-  @Get('moderation')
-  async getModeration() {
-    const s = await this.prisma.setting.findUnique({
-      where: { key: 'moderation.autoApprove' }
-    });
-    const value = s?.value ?? 'true';
-    return { autoApprove: value === 'true' };
-  }
-
-  @Patch('moderation')
-  async setModeration(@Body() body: { autoApprove?: boolean }) {
-    if (typeof body?.autoApprove !== 'boolean') {
-      throw new BadRequestException('autoApprove: boolean required');
-    }
-    const value = body.autoApprove ? 'true' : 'false';
-    await this.prisma.setting.upsert({
-      where: { key: 'moderation.autoApprove' },
-      update: { value },
-      create: {
-        key: 'moderation.autoApprove',
-        value,
-        description: 'Публиковать новые объявления сразу (true) или через модерацию (false)'
-      }
-    });
-    return { autoApprove: body.autoApprove };
-  }
 
   @Get('stats')
   async stats() {
@@ -273,6 +245,7 @@ export class AdminController {
           priceSuffix: true,
           status: true,
           moderationNotes: true,
+          placedByAdmin: true,
           cityId: true,
           regionId: true,
           authorId: true,
@@ -405,25 +378,6 @@ export class AdminController {
   // Только перечисленные ключи; значение проверяется по диапазону. Лента подхватывает
   // новые веса в течение минуты (кеш в AdsService).
 
-  // Диагностика: какой IP сервер видит у админа. Должен совпасть с настоящим
-  // адресом — иначе лимиты запросов считаются по адресу прокси, общему для всех.
-  @Get('whoami')
-  whoami(@Req() req: { ip?: string; ips?: string[]; socket?: { remoteAddress?: string }; headers: Record<string, unknown> }) {
-    // Все заголовки, в которых прокси могут передавать адрес клиента, — чтобы понять,
-    // откуда брать настоящий IP за прокси Amvera. Только для админа.
-    const ipHeaders = Object.fromEntries(
-      Object.entries(req.headers).filter(([k]) => /forward|real|client|via|envoy|cf-|true-|ip/i.test(k))
-    );
-    return {
-      ip: req.ip ?? null,
-      ips: req.ips ?? [],
-      socket: req.socket?.remoteAddress ?? null,
-      forwardedFor: req.headers['x-forwarded-for'] ?? null,
-      realIp: req.headers['x-real-ip'] ?? null,
-      ipHeaders
-    };
-  }
-
   @Get('settings')
   async getSettings() {
     const rows = await this.prisma.setting.findMany({
@@ -492,6 +446,66 @@ export class AdminController {
       funnel30d: Object.fromEntries(funnel.map((r) => [r.name, r._sum.count ?? 0])),
       devices: devices.map((d) => ({ ...d, push: !!d.userId && withPush.has(d.userId) }))
     };
+  }
+
+  // Обнулить метрики приложения (перед запуском: в них тестовые установки и показы).
+  // Подписки на пуши не трогаем.
+  @Delete('app')
+  async resetAppStats() {
+    const [devices, events] = await this.prisma.$transaction([
+      this.prisma.appDevice.deleteMany({}),
+      this.prisma.appEventDaily.deleteMany({})
+    ]);
+    return { devices: devices.count, events: events.count };
+  }
+
+  /**
+   * Разместить объявление за пользователя (сбор первых объявлений): по почте продавца находим
+   * или создаём аккаунт, публикуем объявление от его имени сразу (admin = модератор), продавцу —
+   * письмо со ссылкой. Управлять объявлением он может, войдя по коду на эту почту.
+   * Нужно согласие человека: мы вносим его почту, имя и телефон.
+   */
+  @Post('ads/for-user')
+  async createAdForUser(@Body() body: PlaceAdForUserDto) {
+    const email = body.email.trim().toLowerCase();
+    const phone = body.phone ? body.phone.replace(/[^\d+]/g, '') : '';
+    const city = await this.prisma.city.findUnique({ where: { id: body.ad.cityId } });
+    if (!city) throw new BadRequestException('Unknown city');
+
+    let user = await this.prisma.user.findUnique({ where: { email } });
+    const isNew = !user;
+    if (!user) {
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            email,
+            name: body.name.trim(),
+            phone: phone || null,
+            contactMethod: phone && body.contactMethod === 'phone' ? 'phone' : 'chat',
+            homeCityId: city.id,
+            // Профиль заполнен администратором — страница продавца и объявления видны сразу
+            onboardedAt: new Date()
+          }
+        });
+      } catch (err: any) {
+        if (err?.code === 'P2002') throw new BadRequestException('Этот телефон уже привязан к другому аккаунту');
+        throw err;
+      }
+    } else if (user.blockedAt) {
+      throw new BadRequestException('Этот пользователь заблокирован');
+    }
+
+    const ad = await this.adsService.create(user.id, body.ad, { byAdmin: true });
+    await this.notifications.notify(user.id, {
+      type: 'ad_placed',
+      title: `Ваше объявление размещено: «${ad.title}»`,
+      body:
+        'Мы разместили его на Доске/КВН по вашей просьбе — бесплатно. Чтобы изменить, снять или удалить объявление, ' +
+        'войдите на сайт с этой почтой: пришлём код, пароль не нужен. Не просили размещать — ответьте на это письмо или напишите в поддержку, удалим.',
+      link: `/ad/${ad.id}`,
+      cta: 'Открыть объявление'
+    });
+    return { id: ad.id, userId: user.id, newUser: isNew };
   }
 
   // ── Соседние города и контакты сайта ─────────────────────────────

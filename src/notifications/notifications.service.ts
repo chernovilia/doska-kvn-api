@@ -11,6 +11,7 @@ export type NotificationType =
   | 'ad_hidden'
   | 'ad_removed'
   | 'ad_pending'
+  | 'ad_placed'
   | 'ad_expiring'
   | 'ad_archived'
   | 'ad_deleting'

@@ -8,6 +8,7 @@ import { UploadsModule } from '../uploads/uploads.module';
 @Module({
   imports: [AuthModule, UploadsModule],
   controllers: [AdsController, MyAdsController],
-  providers: [AdsService, AdLifecycleService]
+  providers: [AdsService, AdLifecycleService],
+  exports: [AdsService]
 })
 export class AdsModule {}

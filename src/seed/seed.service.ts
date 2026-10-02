@@ -23,9 +23,6 @@ export class SeedService implements OnModuleInit {
     await this.seedRegions();
     await this.seedCities();
     await this.seedTiers();
-    const demo = await this.seedDemoUser();
-    await this.seedDemoBusinessProfile(demo.id);
-    await this.seedDemoAds(demo.id);
     await this.seedSettings();
 
     this.logger.log('🌱 Seed complete — можешь убрать SEED_ON_STARTUP из переменных');
@@ -117,118 +114,6 @@ export class SeedService implements OnModuleInit {
       });
     }
     this.logger.log(`✔ Tiers: ${TIERS.length}`);
-  }
-
-  private async seedDemoUser() {
-    const userData = {
-      phone: '+79081234567',
-      name: 'Илья Чернов',
-      avatar:
-        'https://images.unsplash.com/photo-1502685104226-ee32379fefbe?w=200&h=200&fit=crop&auto=format',
-      homeCityId: 'vyksa',
-      type: UserType.master,
-      role: 'owner' as const,
-      verified: true,
-      isPublic: true,
-      rating: 4.9,
-      reviewsCount: 34,
-      dealsCount: 128
-    };
-    const user = await this.prisma.user.upsert({
-      where: { id: 'u-ilya' },
-      update: userData,
-      create: { id: 'u-ilya', ...userData }
-    });
-    // Кошелёк со стартовой наградой
-    await this.prisma.wallet.upsert({
-      where: { userId: user.id },
-      update: {},
-      create: { userId: user.id, balance: 10 }
-    });
-    this.logger.log(`✔ Demo user: ${user.id}`);
-    return user;
-  }
-
-  private async seedDemoBusinessProfile(userId: string) {
-    const data = {
-      slug: 'ilya-master',
-      name: 'Мастерская Ильи',
-      description:
-        'Ремонт стиральных машин, электрика и мелкий ремонт бытовой техники. Выезд по КВН.',
-      categories: ['Ремонт техники', 'Электрик', 'Сантехник'],
-      hours: 'Пн–Сб · 8:00–22:00',
-      address: 'Выкса, ул. Ленина, 14',
-      phone: '+7 (908) 123-45-67',
-      verified: true,
-      currentTierName: 'top'
-    };
-    await this.prisma.businessProfile.upsert({
-      where: { userId },
-      update: data,
-      create: { userId, ...data }
-    });
-    this.logger.log(`✔ Business profile: ilya-master`);
-  }
-
-  private async seedDemoAds(userId: string) {
-    const now = new Date('2026-09-22T14:00:00Z');
-    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
-
-    const demoAds = [
-      { id: 'm-macbook-vyksa', section: 'market', categoryGroup: 'Электроника', category: 'Ноутбуки', title: 'MacBook Pro 13" 2020, M1, 16/512', price: 78000, cityId: 'vyksa', regionId: 'kvn', address: 'Выкса, ул. Ленина', description: 'Ноутбук в идеальном состоянии, циклов зарядки 87.', top: true, verified: true, promoLevel: 4, photos: ['https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=900&auto=format&fit=crop'] },
-      { id: 's-elec-kul', section: 'services', categoryGroup: 'Ремонт и обслуживание', category: 'Электрик', title: 'Электрик с выездом Кулебаки / Выкса', price: 500, priceSuffix: 'от, ₽', cityId: 'kulebaki', regionId: 'kvn', address: 'Кулебаки и район', description: 'Установка розеток, замена проводки. Опыт 14 лет.', top: true, verified: true, promoLevel: 1, photos: ['https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=900&auto=format&fit=crop'] },
-      { id: 'r-2k-vyksa', section: 'realty', categoryGroup: 'Аренда — жильё', category: 'Сдам 2-к квартиру', title: 'Сдам 2-к квартиру в центре Выксы', price: 18000, priceSuffix: '₽/мес', cityId: 'vyksa', regionId: 'kvn', address: 'Выкса, ул. Островского, 42', description: '52 м², 3/5 эт., кирпич. Мебель, техника, интернет.', top: true, verified: true, promoLevel: 0, photos: ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900&auto=format&fit=crop'] },
-      { id: 'a-vesta-vyksa', section: 'auto', categoryGroup: 'Легковые', category: 'Седаны', title: 'Lada Vesta 2019, 1.6, МКПП', price: 720000, cityId: 'vyksa', regionId: 'kvn', address: 'Выкса, ул. Ленина', description: 'Один хозяин по ПТС. Пробег 68000 км.', top: true, verified: true, promoLevel: 2, urgent: true, photos: ['https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=900&auto=format&fit=crop'] },
-      { id: 'e-cinema-kul', section: 'events', categoryGroup: 'Развлечения', category: 'Кино', title: 'Киносеанс «Ёлки-11» в ДК Кулебаки', price: 250, priceSuffix: '₽/билет', cityId: 'kulebaki', regionId: 'kvn', address: 'Кулебаки, ДК Кулебаки, Большой зал', description: 'Премьера в маленьком городе.', eventDate: new Date('2026-09-26T16:00:00Z'), top: true, verified: true, promoLevel: 0, photos: ['https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=900&auto=format&fit=crop'] }
-    ];
-
-    const authorSnapshot = {
-      name: 'Илья Чернов',
-      avatar:
-        'https://images.unsplash.com/photo-1502685104226-ee32379fefbe?w=200&h=200&fit=crop&auto=format',
-      rating: 4.9,
-      verified: true,
-      type: 'master'
-    };
-
-    for (const ad of demoAds) {
-      const { photos, ...rest } = ad;
-      const createdAt = daysAgo(Math.floor(Math.random() * 5) + 1);
-      const viewsCount = Math.floor(Math.random() * 200);
-      const writeClicksCount = Math.floor(Math.random() * 20);
-
-      await this.prisma.ad.upsert({
-        where: { id: ad.id },
-        update: {
-          ...rest,
-          status: AdStatus.approved,
-          publishedAt: createdAt,
-          authorType: UserType.master,
-          authorSnapshot,
-          viewsCount,
-          writeClicksCount
-        },
-        create: {
-          ...rest,
-          authorId: userId,
-          authorType: UserType.master,
-          authorSnapshot,
-          status: AdStatus.approved,
-          moderationLevel: 'auto',
-          createdAt,
-          publishedAt: createdAt,
-          viewsCount,
-          writeClicksCount
-        }
-      });
-      await this.prisma.adPhoto.deleteMany({ where: { adId: ad.id } });
-      for (let i = 0; i < photos.length; i++) {
-        await this.prisma.adPhoto.create({
-          data: { adId: ad.id, url: photos[i], order: i }
-        });
-      }
-    }
-    this.logger.log(`✔ Ads: ${demoAds.length}`);
   }
 
   private async seedSettings() {

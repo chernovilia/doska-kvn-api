@@ -251,6 +251,8 @@ model Ad {
   promoExpiresAt  DateTime?
   boostedAt       DateTime?
   autoBumpUntil   DateTime?                               // Автоподъём (пакетная опция)
+  autoBump        Boolean         @default(false)         // автор включил автоподнятие: поднимаем сами каждые bump_cooldown_days
+  placedByAdmin   Boolean         @default(false)         // размещено администратором за пользователя
   highlight       Boolean         @default(false)
 
   // Тумблеры-плашки для быстрого рендера

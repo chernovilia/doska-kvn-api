@@ -16,7 +16,7 @@ export class RegionsController {
       readJsonSetting<Record<string, string[]>>(this.prisma, NEIGHBORS_KEY, {}),
       readJsonSetting<SiteContacts>(this.prisma, CONTACTS_KEY, {}),
       readJsonSetting<Record<string, string>>(this.prisma, APP_TEXTS_KEY, {}),
-      this.prisma.setting.findMany({ where: { key: { in: appKeys } } })
+      this.prisma.setting.findMany({ where: { key: { in: [...appKeys, 'ranking.auto_bump_enabled', 'ranking.bump_cooldown_days'] } } })
     ]);
     // Настройки окон приложения: { 'app.install.enabled': true, 'app.install.delay_sec': 8, … }
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
@@ -26,7 +26,12 @@ export class RegionsController {
       const raw = byKey.get(k) ?? def.default;
       app[k] = def.type === 'bool' ? raw === 'true' : Number(raw);
     }
-    return { neighbors, contacts, app };
+    // Что доступно авторам: автоподнятие и через сколько дней оно срабатывает
+    const features = {
+      autoBump: (byKey.get('ranking.auto_bump_enabled') ?? 'true') === 'true',
+      bumpCooldownDays: Number(byKey.get('ranking.bump_cooldown_days') ?? MANAGED_SETTINGS['ranking.bump_cooldown_days'].default)
+    };
+    return { neighbors, contacts, app, features };
   }
 
   @Get('regions')

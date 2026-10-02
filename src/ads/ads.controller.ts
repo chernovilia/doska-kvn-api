@@ -102,6 +102,12 @@ export class AdsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/auto-bump')
+  autoBump(@CurrentUser() userId: string, @Param('id') id: string, @Body() body: { enabled?: boolean }) {
+    return this.ads.setAutoBump(userId, id, body?.enabled === true);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/archive')
   archive(@CurrentUser() userId: string, @Param('id') id: string) {
     return this.ads.archiveOwn(userId, id);

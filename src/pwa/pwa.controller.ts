@@ -8,7 +8,9 @@ export const APP_EVENTS = [
   'install_prompt_shown', // показали окно-гайд
   'install_clicked', // нажали «Установить» (Android/Chrome — системное окно)
   'install_accepted', // системное окно: «Установить»
-  'install_dismissed', // закрыли гайд «Не сейчас»
+  'install_dismissed', // «Не показывать» или крестик в окне
+  'banner_clicked', // «Установить» в баннере
+  'banner_closed', // крестик баннера
   'push_prompt_shown', // предложили включить уведомления
   'push_enabled' // включили уведомления
 ] as const;

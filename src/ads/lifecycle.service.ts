@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DAY_MS, lifecycleSettings, purgeAd } from './lifecycle';
+import { readNumberSettings } from '../settings/read-settings';
 
 const RUN_EVERY_MS = 60 * 60_000;
 const BATCH = 200;
@@ -46,7 +47,7 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
     if (this.running) return;
     this.running = true;
     try {
-      const stats = await this.step();
+      const stats = { ...(await this.step()), autoBumped: await this.autoBump() };
       if (Object.values(stats).some((n) => n > 0)) this.logger.log(JSON.stringify(stats));
       // Раз в сутки — потерянные фото (загрузили и закрыли форму, сменили аватар).
       if (Date.now() - this.lastOrphanSweep > 23 * 3_600_000) {
@@ -59,6 +60,29 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Автоподнятие: у опубликованных объявлений с включённым autoBump, у которых наступил срок
+   * подъёма (ranking.bump_cooldown_days после публикации или прошлого подъёма), ставим boostedAt.
+   * Выключено в админке (ranking.auto_bump_enabled) — никого не поднимаем.
+   */
+  async autoBump(): Promise<number> {
+    const enabled = await this.prisma.setting.findUnique({ where: { key: 'ranking.auto_bump_enabled' } });
+    if ((enabled?.value ?? 'true') !== 'true') return 0;
+    const s = await readNumberSettings(this.prisma, { 'ranking.bump_cooldown_days': 10 });
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - s['ranking.bump_cooldown_days'] * DAY_MS);
+    const { count } = await this.prisma.ad.updateMany({
+      where: {
+        status: AdStatus.approved,
+        autoBump: true,
+        publishedAt: { lte: cutoff },
+        OR: [{ boostedAt: null }, { boostedAt: { lte: cutoff } }]
+      },
+      data: { boostedAt: now }
+    });
+    return count;
   }
 
   /**

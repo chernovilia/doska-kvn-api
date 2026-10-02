@@ -31,9 +31,14 @@ export const MANAGED_SETTINGS: Record<
     type: 'number', default: '8', min: 0, max: 120, step: 1
   },
   'app.install.dismiss_days': {
-    label: 'Пауза после «Не сейчас», дней',
-    hint: 'Сколько дней не показывать окно установки само (из Настроек — всегда)',
-    type: 'number', default: '14', min: 0, max: 90, step: 1
+    label: 'Пауза после «Не показывать», дней',
+    hint: 'Сколько дней не показывать окно и баннер установки сами (из Настроек — всегда). 365 — почти навсегда',
+    type: 'number', default: '14', min: 0, max: 365, step: 1
+  },
+  'app.banner.enabled': {
+    label: 'Баннер «Установите приложение» вверху страниц',
+    hint: 'Узкая полоса с кнопкой «Установить»; крестик прячет её на срок паузы',
+    type: 'bool', default: 'true', min: 0, max: 1
   },
   'app.push.after_message': {
     label: 'Предлагать уведомления после первого сообщения',
@@ -84,6 +89,11 @@ export const MANAGED_SETTINGS: Record<
     label: 'Отзыв: часов с начала переписки',
     hint: 'Не раньше этого времени после первого сообщения',
     type: 'number', default: '1', min: 0, max: 72, step: 1
+  },
+  'ranking.auto_bump_enabled': {
+    label: 'Автоподнятие доступно',
+    hint: 'Автор может включить: объявление поднимается само, когда наступает срок подъёма',
+    type: 'bool', default: 'true', min: 0, max: 1
   },
   'ranking.bump_cooldown_days': {
     label: 'Поднять можно через, дней',
