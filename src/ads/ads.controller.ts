@@ -8,9 +8,10 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import { validGid } from '../guest-id';
 import { Throttle } from '@nestjs/throttler';
@@ -42,6 +43,14 @@ export class AdsController {
   }
 
   @UseGuards(OptionalJwtAuthGuard)
+  // Превью для соцсетей: JPEG 1200×630 из первого фото (ВКонтакте не показывает WebP).
+  @Get(':id/og.jpg')
+  async ogImage(@Param('id') id: string, @Res() res: Response) {
+    const jpeg = await this.ads.ogImage(id);
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+    res.send(jpeg);
+  }
+
   @Get(':id')
   find(@Param('id') id: string, @Req() req: Request & { userId?: string }) {
     return this.ads.findById(id, req.userId);

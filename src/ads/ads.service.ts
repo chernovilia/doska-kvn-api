@@ -5,6 +5,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { buildSearchText, normalizeSearch } from './search-text';
 import { publicAd } from './public-ad';
 import { DAY_MS, lifecycleInfo, lifecycleSettings, purgeAd } from './lifecycle';
+import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3ClientService } from '../uploads/s3.client';
 import { ListAdsDto } from './dto/list-ads.dto';
@@ -553,6 +554,33 @@ export class AdsService implements OnApplicationBootstrap {
         cta: 'Проверить'
       });
     }
+  }
+
+  // Картинка для превью ссылки в соцсетях: первое фото объявления в JPEG 1200×630.
+  // Фото на сайте хранятся в WebP, а превью ссылок ВКонтакте WebP не показывает.
+  private ogCache = new Map<string, Buffer>();
+
+  async ogImage(adId: string): Promise<Buffer> {
+    const ad = await this.prisma.ad.findUnique({
+      where: { id: adId },
+      select: { status: true, photos: { orderBy: { order: 'asc' }, take: 1, select: { url: true } } }
+    });
+    const url = ad?.status === AdStatus.approved ? ad.photos[0]?.url : undefined;
+    // Только свои фото из хранилища: чужой адрес сюда попасть не может, но проверяем
+    if (!url || !url.startsWith(`${this.s3.publicUrlBase}/`)) throw new NotFoundException('No image');
+    const cached = this.ogCache.get(url);
+    if (cached) return cached;
+    const res = await fetch(url);
+    if (!res.ok) throw new NotFoundException('No image');
+    const jpeg = await sharp(Buffer.from(await res.arrayBuffer()))
+      .resize({ width: 1200, height: 630, fit: 'cover', position: sharp.strategy.attention })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
+    // Небольшой кеш в памяти: соцсеть за превью приходит несколько раз подряд
+    if (this.ogCache.size >= 100) this.ogCache.delete(this.ogCache.keys().next().value as string);
+    this.ogCache.set(url, jpeg);
+    return jpeg;
   }
 
   private async autoBumpAllowed(): Promise<boolean> {
