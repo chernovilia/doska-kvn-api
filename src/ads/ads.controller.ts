@@ -42,8 +42,9 @@ export class AdsController {
     return this.ads.sitemapEntries();
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
   // Превью для соцсетей: JPEG 1200×630 из первого фото (ВКонтакте не показывает WebP).
+  // Пережатие картинки нагружает процессор — отдельный лимит.
+  @Throttle({ short: { limit: 30, ttl: 60_000 } })
   @Get(':id/og.jpg')
   async ogImage(@Param('id') id: string, @Res() res: Response) {
     const jpeg = await this.ads.ogImage(id);
@@ -51,6 +52,8 @@ export class AdsController {
     res.send(jpeg);
   }
 
+  // Своё объявление на модерации или отклонённое видит автор (и администратор) — нужен вход.
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
   find(@Param('id') id: string, @Req() req: Request & { userId?: string }) {
     return this.ads.findById(id, req.userId);

@@ -4,6 +4,7 @@ import { adminUserIds, isAdminUser } from '../auth/admin-check';
 import { NotificationsService } from '../notifications/notifications.service';
 import { buildSearchText, normalizeSearch } from './search-text';
 import { publicAd } from './public-ad';
+import { newAdId, resolveAdId } from './short-id';
 import { DAY_MS, lifecycleInfo, lifecycleSettings, purgeAd } from './lifecycle';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
@@ -447,7 +448,10 @@ export class AdsService implements OnApplicationBootstrap {
 
   // Неопубликованные (на модерации, отклонённые, скрытые) видят только автор и админы;
   // причину модерации — тоже только они.
-  async findById(id: string, viewerId?: string) {
+  async findById(idOrShort: string, viewerId?: string) {
+    // В адресе может быть короткий id (первые 8 символов)
+    const id = await resolveAdId(this.prisma, idOrShort);
+    if (!id) throw new NotFoundException('Ad not found');
     const ad = await this.prisma.ad.findUnique({
       where: { id },
       include: {
@@ -560,7 +564,9 @@ export class AdsService implements OnApplicationBootstrap {
   // Фото на сайте хранятся в WebP, а превью ссылок ВКонтакте WebP не показывает.
   private ogCache = new Map<string, Buffer>();
 
-  async ogImage(adId: string): Promise<Buffer> {
+  async ogImage(idOrShort: string): Promise<Buffer> {
+    const adId = await resolveAdId(this.prisma, idOrShort);
+    if (!adId) throw new NotFoundException('No image');
     const ad = await this.prisma.ad.findUnique({
       where: { id: adId },
       select: { status: true, photos: { orderBy: { order: 'asc' }, take: 1, select: { url: true } } }
@@ -610,6 +616,7 @@ export class AdsService implements OnApplicationBootstrap {
 
     const created = await this.prisma.ad.create({
       data: {
+        id: await newAdId(this.prisma),
         ...data,
         autoBump: !!dto.autoBump && (await this.autoBumpAllowed()),
         placedByAdmin: !!opts.byAdmin,

@@ -1,3 +1,4 @@
+import { adLink } from '../ads/short-id';
 import {
   BadRequestException,
   Body,
@@ -331,7 +332,7 @@ export class AdminController {
             ? `Объявление опубликовано: «${before.title}»`
             : `Объявление снова в ленте: «${before.title}»`,
           body: 'Его уже видят в ленте и поиске.',
-          link: `/ad/${id}`,
+          link: adLink(id),
           cta: 'Открыть объявление'
         });
       } else if (body.status === 'rejected') {
@@ -339,7 +340,7 @@ export class AdminController {
           type: 'ad_rejected',
           title: `Объявление отклонено: «${before.title}»`,
           body: reason || 'Оно не прошло модерацию. Проверьте правила и подайте заново.',
-          link: `/ad/${id}`,
+          link: adLink(id),
           cta: 'Посмотреть'
         });
       } else if (body.status === 'hidden') {
@@ -347,7 +348,7 @@ export class AdminController {
           type: 'ad_hidden',
           title: `Объявление скрыто модератором: «${before.title}»`,
           body: `${reason ? `${reason}\n` : ''}Его не видно в ленте и поиске. Если это ошибка — напишите в поддержку.`,
-          link: `/ad/${id}`,
+          link: adLink(id),
           cta: 'Посмотреть'
         });
       }
@@ -502,7 +503,7 @@ export class AdminController {
       body:
         'Мы разместили его на Доске/КВН по вашей просьбе — бесплатно. Чтобы изменить, снять или удалить объявление, ' +
         'войдите на сайт с этой почтой: пришлём код, пароль не нужен. Не просили размещать — ответьте на это письмо или напишите в поддержку, удалим.',
-      link: `/ad/${ad.id}`,
+      link: adLink(ad.id),
       cta: 'Открыть объявление'
     });
     return { id: ad.id, userId: user.id, newUser: isNew };

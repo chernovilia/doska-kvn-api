@@ -1,3 +1,4 @@
+import { adLink } from './short-id';
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { AdStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -163,7 +164,7 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
         type: 'ad_expiring',
         title: `Скоро уйдёт в архив: «${ad.title}»`,
         body: `Объявление показывается до ${formatDay(ad.expiresAt!)}. Если оно ещё актуально — продлите, это бесплатно.`,
-        link: `/ad/${ad.id}`,
+        link: adLink(ad.id),
         cta: 'Продлить'
       });
     }
@@ -184,7 +185,7 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
         type: 'ad_archived',
         title: `Объявление в архиве: «${ad.title}»`,
         body: `Срок показа закончился. Вернуть его в ленту можно одной кнопкой в течение ${cfg.archiveKeepDays} дней, потом удалим.`,
-        link: `/ad/${ad.id}`,
+        link: adLink(ad.id),
         cta: 'Вернуть в ленту'
       });
     }
@@ -211,7 +212,7 @@ export class AdLifecycleService implements OnApplicationBootstrap, OnModuleDestr
         body: archived
           ? `Объявление в архиве давно. Через ${cfg.warnDays} дн. удалим его вместе с фото — верните в ленту, если ещё актуально.`
           : `Отклонённое объявление удалим через ${cfg.warnDays} дн. вместе с фото. Исправьте и подайте заново, если нужно.`,
-        link: `/ad/${ad.id}`,
+        link: adLink(ad.id),
         cta: archived ? 'Вернуть в ленту' : 'Посмотреть'
       });
     }
