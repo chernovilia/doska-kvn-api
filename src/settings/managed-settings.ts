@@ -50,9 +50,14 @@ export const MANAGED_SETTINGS: Record<
     hint: 'Когда окно установки не показывается (уже установлено или пауза)',
     type: 'bool', default: 'true', min: 0, max: 1
   },
+  'app.push.on_app_open': {
+    label: 'Предлагать уведомления при открытии приложения',
+    hint: 'Установленное приложение, человек вошёл, уведомления выключены — спрашиваем через пару секунд',
+    type: 'bool', default: 'true', min: 0, max: 1
+  },
   'app.push.ask_every_days': {
     label: 'Предлагать уведомления не чаще, дней',
-    hint: 'Пауза после любого ответа на предложение',
+    hint: 'Пауза после «Не сейчас». Просто закрыли окно — спросим в следующий заход',
     type: 'number', default: '14', min: 1, max: 90, step: 1
   },
   'moderation.autoApprove': {
